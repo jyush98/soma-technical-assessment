@@ -13,11 +13,37 @@ model Todo {
   createdAt DateTime  @default(now())
   dueDate   DateTime? // Your existing field
   
-  // New image-related fields for Phase 2
+  // Image-related fields for Part 2
   imageUrl    String?   // URL to the selected Pexels image
   imageAlt    String?   // Alt text for accessibility
   imageLoading Boolean  @default(false)  // Track loading state
   lastImageSearch String? // Cache key to avoid re-searching same title
+
+  // Dependency fields for Part 3
+  estimatedDays        Int?     @default(1)    // For critical path calculation
+  actualStartDate      DateTime?               // When task actually began
+  actualEndDate        DateTime?               // When task actually completed
+  earliestStartDate    DateTime?               // Calculated from dependencies
+  isOnCriticalPath     Boolean  @default(false)
   
   updatedAt   DateTime @updatedAt @default(now()) // Good practice for tracking changes
+
+  // Dependency relationships
+  dependencies     TodoDependency[] @relation("TodoDependencies")
+  dependents       TodoDependency[] @relation("DependentTodos")
+}
+
+model TodoDependency {
+  id           Int @id @default(autoincrement())
+  todoId       Int    // Task that has the dependency
+  dependsOnId  Int    // Task that it depends on
+  
+  // Relationship references
+  todo         Todo @relation("TodoDependencies", fields: [todoId], references: [id], onDelete: Cascade)
+  dependsOn    Todo @relation("DependentTodos", fields: [dependsOnId], references: [id], onDelete: Cascade)
+  
+  createdAt    DateTime @default(now())
+  
+  // Prevent duplicate dependencies
+  @@unique([todoId, dependsOnId])
 }
