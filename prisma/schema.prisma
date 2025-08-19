@@ -9,7 +9,15 @@ datasource db {
 
 model Todo {
   id        Int       @id @default(autoincrement())
-  title     String
+  title     String    // Your existing field
   createdAt DateTime  @default(now())
-  dueDate   DateTime?
+  dueDate   DateTime? // Your existing field
+  
+  // New image-related fields for Phase 2
+  imageUrl    String?   // URL to the selected Pexels image
+  imageAlt    String?   // Alt text for accessibility
+  imageLoading Boolean  @default(false)  // Track loading state
+  lastImageSearch String? // Cache key to avoid re-searching same title
+  
+  updatedAt   DateTime @updatedAt @default(now()) // Good practice for tracking changes
 }
