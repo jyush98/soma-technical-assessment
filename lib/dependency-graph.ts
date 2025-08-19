@@ -5,7 +5,7 @@ export interface TodoWithDependencies {
     text: string;
     completed: boolean;
     dueDate?: Date | null;
-    estimatedHours: number;
+    estimatedDays: number;
     dependencies: { dependsOnId: number }[];
     dependents: { todoId: number }[];
     earliestStartDate?: Date | null;
@@ -301,7 +301,7 @@ export class DependencyGraphService {
 
             // Set earliest times
             scheduleData[todoId].earliestStart = new Date(maxPredecessorFinish);
-            const durationMs = todo.estimatedHours * 60 * 60 * 1000; // Convert hours to milliseconds
+            const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000; // Convert days to milliseconds
             scheduleData[todoId].earliestFinish = new Date(
                 maxPredecessorFinish.getTime() + durationMs
             );
@@ -352,7 +352,7 @@ export class DependencyGraphService {
             }
 
             // Calculate latest start
-            const durationMs = todo.estimatedHours * 60 * 60 * 1000;
+            const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
             scheduleData[todoId].latestStart = new Date(
                 scheduleData[todoId].latestFinish.getTime() - durationMs
             );

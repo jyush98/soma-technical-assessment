@@ -11,13 +11,13 @@ describe('DependencyGraphService', () => {
         id: number,
         text: string,
         dependencies: number[] = [],
-        estimatedHours: number = 1,
+        estimatedDays: number = 1,
         completed: boolean = false
     ) => ({
         id,
         text,
         completed,
-        estimatedHours,
+        estimatedDays,
         dependencies: dependencies.map(depId => ({ dependsOnId: depId })),
         dependents: [], // Will be calculated based on dependencies
         earliestStartDate: null,
@@ -137,7 +137,7 @@ describe('DependencyGraphService', () => {
         it('should calculate critical path for simple linear sequence', async () => {
             const { DependencyGraphService } = await import('@/lib/dependency-graph');
 
-            // Linear: Task 1 (2h) -> Task 2 (3h) -> Task 3 (1h)
+            // Linear: Task 1 (2 days) -> Task 2 (3 days) -> Task 3 (1 day)
             const todos = [
                 createMockTodo(1, 'First', [], 2),
                 createMockTodo(2, 'Second', [1], 3),
@@ -164,8 +164,8 @@ describe('DependencyGraphService', () => {
             const { DependencyGraphService } = await import('@/lib/dependency-graph');
 
             // Parallel paths with different durations:
-            // Path A: Task 1 (1h) -> Task 2 (1h) -> Task 4 (1h) = 3h
-            // Path B: Task 1 (1h) -> Task 3 (5h) -> Task 4 (1h) = 7h (CRITICAL)
+            // Path A: Task 1 (1 day) -> Task 2 (1 day) -> Task 4 (1 day) = 3 days
+            // Path B: Task 1 (1 day) -> Task 3 (5 days) -> Task 4 (1 day) = 7 days (CRITICAL)
             const todos = [
                 createMockTodo(1, 'Start', [], 1),
                 createMockTodo(2, 'Short Branch', [1], 1),
@@ -214,7 +214,7 @@ describe('DependencyGraphService', () => {
             expect(task2Start.getTime()).toBe(task1Finish.getTime());
 
             // Duration check: Task 1 should finish 2 hours after it starts
-            const expectedTask1Duration = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+            const expectedTask1Duration = 2 * 24 * 60 * 60 * 1000; // 2 hours in milliseconds
             expect(task1Finish.getTime() - task1Start.getTime()).toBe(expectedTask1Duration);
         });
 
@@ -240,11 +240,11 @@ describe('DependencyGraphService', () => {
             const { DependencyGraphService } = await import('@/lib/dependency-graph');
 
             // Complex network:
-            //     1(2h)
+            //     1(2 days)
             //    /  |  \
-            //   2(1h) 3(4h) 4(1h)
+            //   2(1 day) 3(4 days) 4(1 day)
             //    \  |  /
-            //     5(2h)
+            //     5(2 days)
             const todos = [
                 createMockTodo(1, 'Foundation', [], 2),
                 createMockTodo(2, 'Module A', [1], 1),
