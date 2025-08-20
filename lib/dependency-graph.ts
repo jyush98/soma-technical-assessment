@@ -337,8 +337,8 @@ export class DependencyGraphService {
             );
 
             if (dependentTasks.length === 0) {
-                // If this is an end task (no dependents), set latest finish to earliest finish
-                scheduleData[todoId].latestFinish = new Date(scheduleData[todoId].earliestFinish);
+                // If this is an end task (no dependents), set latest finish to project end
+                scheduleData[todoId].latestFinish = new Date(projectEndTime);
             } else {
                 // Find earliest latest start of all dependents
                 let minSuccessorStart = new Date(projectEndTime);
@@ -364,6 +364,58 @@ export class DependencyGraphService {
             // Critical path tasks have zero slack
             scheduleData[todoId].isOnCriticalPath = scheduleData[todoId].slack === 0;
         });
+
+        // Handle mixed scenarios: tasks with and without dependencies
+        const hasAnyDependencies = todos.some(t => t.dependencies.length > 0);
+
+        if (hasAnyDependencies) {
+            // Mixed case: handle independent tasks separately
+            const independentTasks = todos.filter(t => t.dependencies.length === 0);
+            const dependentTasks = todos.filter(t => t.dependencies.length > 0);
+
+            if (independentTasks.length > 0) {
+                // Find the critical path length from dependent tasks
+                const criticalPathLengthMs = dependentTasks.length > 0
+                    ? Math.max(...dependentTasks.map(t => scheduleData[t.id].earliestFinish.getTime()))
+                    : 0;
+
+                const criticalPathLengthDays = criticalPathLengthMs / (24 * 60 * 60 * 1000);
+
+                independentTasks.forEach(todo => {
+                    // Independent tasks are critical only if they're as long as the critical path
+                    const shouldBeCritical = todo.estimatedDays >= criticalPathLengthDays;
+                    scheduleData[todo.id].isOnCriticalPath = shouldBeCritical;
+
+                    if (!shouldBeCritical) {
+                        // Calculate slack: how much time they have within the project duration
+                        const projectDurationMs = Math.max(criticalPathLengthMs, projectEndTime);
+                        const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+                        scheduleData[todo.id].slack = projectDurationMs - taskDurationMs;
+
+                        // Update latest times for non-critical independent tasks
+                        scheduleData[todo.id].latestFinish = new Date(projectDurationMs);
+                        scheduleData[todo.id].latestStart = new Date(projectDurationMs - taskDurationMs);
+                    }
+                });
+            }
+        } else {
+            // All tasks are independent - only longest tasks are critical
+            const maxDuration = Math.max(...todos.map(t => t.estimatedDays));
+
+            todos.forEach(todo => {
+                scheduleData[todo.id].isOnCriticalPath = todo.estimatedDays === maxDuration;
+
+                if (todo.estimatedDays < maxDuration) {
+                    const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+                    const maxDurationMs = maxDuration * 24 * 60 * 60 * 1000;
+                    scheduleData[todo.id].slack = maxDurationMs - taskDurationMs;
+
+                    // Update latest times
+                    scheduleData[todo.id].latestFinish = new Date(maxDurationMs);
+                    scheduleData[todo.id].latestStart = new Date(maxDurationMs - taskDurationMs);
+                }
+            });
+        }
     }
 
     /**
