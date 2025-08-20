@@ -9,13 +9,13 @@ describe('DependencyGraphService', () => {
     // Mock todo interface for testing
     const createMockTodo = (
         id: number,
-        text: string,
+        title: string,
         dependencies: number[] = [],
         estimatedDays: number = 1,
         completed: boolean = false
     ) => ({
         id,
-        text,
+        title,
         completed,
         estimatedDays,
         dependencies: dependencies.map(depId => ({ dependsOnId: depId })),

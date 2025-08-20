@@ -25,6 +25,8 @@ model Todo {
   actualEndDate        DateTime?               // When task actually completed
   earliestStartDate    DateTime?               // Calculated from dependencies
   isOnCriticalPath     Boolean  @default(false)
+
+  completed        Boolean  @default(false)
   
   updatedAt   DateTime @updatedAt @default(now()) // Good practice for tracking changes
 
