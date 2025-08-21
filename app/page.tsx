@@ -40,7 +40,13 @@ export default function Home() {
     }
   };
 
-  const handleAddTodo = async (title: string, dueDate: string | null) => {
+  // Updated to handle all the new fields
+  const handleAddTodo = async (
+    title: string,
+    dueDate: string | null,
+    estimatedDays: number,
+    dependencies: number[]
+  ) => {
     setIsAddingTodo(true);
     try {
       await fetch('/api/todos', {
@@ -48,7 +54,9 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
-          dueDate
+          dueDate,
+          estimatedDays,
+          dependencies
         }),
       });
       await fetchTodos();
@@ -188,6 +196,7 @@ export default function Home() {
             <AddToDoForm
               onAddTodo={handleAddTodo}
               isLoading={isAddingTodo}
+              existingTodos={todos} // Pass existing todos for dependency selection
             />
           </div>
         </div>
@@ -226,7 +235,7 @@ export default function Home() {
 
         {/* Enhanced Stats Section */}
         {todos.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200/60 hover:shadow-xl transition-shadow duration-300">
               <div className="flex items-center">
                 <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center mr-4">
@@ -267,6 +276,22 @@ export default function Home() {
                 <div>
                   <h4 className="font-semibold text-gray-900 text-lg">Critical Path</h4>
                   <p className="text-3xl font-light text-red-600 mt-1">{criticalPathTasks.length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200/60 hover:shadow-xl transition-shadow duration-300">
+              <div className="flex items-center">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-violet-600 rounded-xl flex items-center justify-center mr-4">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-900 text-lg">Total Duration</h4>
+                  <p className="text-3xl font-light text-purple-600 mt-1">
+                    {todos.reduce((sum, todo) => sum + (todo.estimatedDays || 1), 0)} days
+                  </p>
                 </div>
               </div>
             </div>
