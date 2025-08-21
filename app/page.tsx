@@ -288,9 +288,9 @@ export default function Home() {
                   </svg>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-gray-900 text-lg">Total Duration</h4>
+                  <h4 className="font-semibold text-gray-900 text-lg">Project Duration</h4>
                   <p className="text-3xl font-light text-purple-600 mt-1">
-                    {todos.reduce((sum, todo) => sum + (todo.estimatedDays || 1), 0)} days
+                    {totalEstimatedDays} days
                   </p>
                 </div>
               </div>
