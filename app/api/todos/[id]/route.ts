@@ -60,10 +60,12 @@ export async function PATCH(
 
     // Prepare update data
     const updateData: any = {};
+    let shouldRecalculate = false;
 
-    // Handle completed toggle
+    // Handle completed toggle - triggers recalculation
     if (typeof body.completed === 'boolean') {
       updateData.completed = body.completed;
+      shouldRecalculate = true; // Completion changes affect critical path
     }
 
     // Handle title update
@@ -83,11 +85,12 @@ export async function PATCH(
       }
     }
 
-    // Handle estimated days update
+    // Handle estimated days update - triggers recalculation
     if (body.estimatedDays !== undefined) {
       const days = parseInt(body.estimatedDays);
       if (days >= 1 && days <= 365) {
         updateData.estimatedDays = days;
+        shouldRecalculate = true; // Duration changes affect critical path
       }
     }
 
@@ -101,15 +104,37 @@ export async function PATCH(
       },
     });
 
-    // If title changed, trigger image generation (we'll handle this async)
+    // Recalculate critical path if needed
+    if (shouldRecalculate) {
+      await recalculateCriticalPath();
+
+      // Fetch the todo again to get updated critical path info
+      const todoWithCriticalPath = await prisma.todo.findUnique({
+        where: { id },
+        include: {
+          dependencies: true,
+          dependents: true,
+        },
+      });
+
+      // If title changed, trigger image generation (async)
+      if (body.title && body.title !== existingTodo.title) {
+        await prisma.todo.update({
+          where: { id },
+          data: { imageLoading: true },
+        });
+        generateImageForTodo(id, body.title);
+      }
+
+      return NextResponse.json(todoWithCriticalPath);
+    }
+
+    // If title changed but no recalculation needed
     if (body.title && body.title !== existingTodo.title) {
-      // Set imageLoading flag and trigger async image generation
       await prisma.todo.update({
         where: { id },
         data: { imageLoading: true },
       });
-
-      // Trigger image generation in background (non-blocking)
       generateImageForTodo(id, body.title);
     }
 
@@ -133,10 +158,58 @@ export async function DELETE(
     await prisma.todo.delete({
       where: { id },
     });
-    return NextResponse.json({ message: 'Todo deleted' }, { status: 200 });
+
+    // Recalculate critical path after deletion
+    await recalculateCriticalPath();
+
+    return NextResponse.json({
+      message: 'Todo deleted and critical path updated'
+    }, { status: 200 });
   } catch (error) {
     console.error('Error deleting todo:', error);
     return NextResponse.json({ error: 'Error deleting todo' }, { status: 500 });
+  }
+}
+
+// Helper function to recalculate critical path and update database
+async function recalculateCriticalPath() {
+  const todos = await prisma.todo.findMany({
+    include: {
+      dependencies: { select: { dependsOnId: true } },
+      dependents: { select: { todoId: true } }
+    }
+  });
+
+  // Transform to match algorithm interface
+  const todosForCalculation = todos.map(t => ({
+    id: t.id,
+    title: t.title,
+    completed: t.completed,
+    estimatedDays: t.estimatedDays || 1,
+    dependencies: t.dependencies,
+    dependents: t.dependents,
+    earliestStartDate: t.earliestStartDate,
+    criticalPathLength: 0,
+    isOnCriticalPath: t.isOnCriticalPath
+  }));
+
+  const { DependencyGraphService } = await import('@/lib/dependency-graph');
+  const result = DependencyGraphService.calculateCriticalPath(todosForCalculation);
+
+  if (result.isValid && result.scheduleData) {
+    // Update todos with critical path information in a single transaction
+    const updatePromises = Object.entries(result.scheduleData).map(
+      ([todoId, scheduleInfo]) =>
+        prisma.todo.update({
+          where: { id: parseInt(todoId) },
+          data: {
+            earliestStartDate: scheduleInfo.earliestStart,
+            isOnCriticalPath: scheduleInfo.isOnCriticalPath
+          }
+        })
+    );
+
+    await prisma.$transaction(updatePromises);
   }
 }
 

@@ -317,7 +317,7 @@ export class DependencyGraphService {
 
     /**
      * Calculate latest start and finish times (backward pass) using standard CPM
-     * Fixed to properly propagate critical path through dependency chain
+     * Fixed to properly handle independent tasks that match critical path duration
      */
     private static calculateBackwardPass(
         todos: TodoWithDependencies[],
@@ -331,11 +331,21 @@ export class DependencyGraphService {
             ...Object.values(scheduleData).map((data: any) => data.earliestFinish.getTime())
         );
 
-        // Process in reverse topological order (end tasks first)
+        // Separate tasks into dependent and independent
+        const independentTasks = todos.filter(t => t.dependencies.length === 0 &&
+            !todos.some(other => other.dependencies.some(dep => dep.dependsOnId === t.id)));
+        const dependentTasks = todos.filter(t => !independentTasks.includes(t));
+
+        // First, calculate backward pass for tasks with dependencies
         const reverseOrder = [...topologicalOrder].reverse();
 
         reverseOrder.forEach(todoId => {
             const todo = todoMap.get(todoId)!;
+
+            // Skip independent tasks for now
+            if (independentTasks.some(t => t.id === todoId)) {
+                return;
+            }
 
             // Find all tasks that depend on this task (successors)
             const successorTasks = todos.filter(t =>
@@ -374,7 +384,47 @@ export class DependencyGraphService {
             scheduleData[todoId].isOnCriticalPath = Math.abs(scheduleData[todoId].slack) < 1000; // 1 second tolerance
         });
 
-        // Handle special case: all tasks are independent (no dependencies at all)
+        // Now handle independent tasks
+        if (independentTasks.length > 0) {
+            // Find the critical path duration from dependent tasks
+            let criticalPathDuration = 0;
+
+            if (dependentTasks.length > 0) {
+                // Get the maximum duration from tasks already marked as critical
+                const criticalDependentTasks = dependentTasks.filter(t => scheduleData[t.id].isOnCriticalPath);
+                if (criticalDependentTasks.length > 0) {
+                    criticalPathDuration = Math.max(
+                        ...criticalDependentTasks.map(t =>
+                            scheduleData[t.id].earliestFinish.getTime() - scheduleData[t.id].earliestStart.getTime()
+                        )
+                    );
+                    // Actually, we want the project end time from the dependent critical path
+                    criticalPathDuration = projectEndTime;
+                }
+            }
+
+            // For independent tasks, mark as critical if their duration >= the critical path duration
+            independentTasks.forEach(todo => {
+                const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+                const taskEndTime = scheduleData[todo.id].earliestFinish.getTime();
+
+                // Task is critical if it ends at or after the project end time
+                // This handles the case where an independent task has the same duration as the critical path
+                const isCritical = taskEndTime >= projectEndTime - 1000; // 1 second tolerance
+
+                scheduleData[todo.id].isOnCriticalPath = isCritical;
+                scheduleData[todo.id].latestFinish = new Date(projectEndTime);
+                scheduleData[todo.id].latestStart = new Date(projectEndTime - taskDurationMs);
+
+                if (isCritical) {
+                    scheduleData[todo.id].slack = 0;
+                } else {
+                    scheduleData[todo.id].slack = projectEndTime - taskEndTime;
+                }
+            });
+        }
+
+        // Special case: ALL tasks are independent (no dependencies at all)
         const hasAnyDependencies = todos.some(t => t.dependencies.length > 0);
 
         if (!hasAnyDependencies && todos.length > 0) {
@@ -386,8 +436,6 @@ export class DependencyGraphService {
                 scheduleData[todo.id].isOnCriticalPath = isCritical;
 
                 if (!isCritical) {
-                    // Non-critical independent tasks have slack equal to the difference
-                    // between their duration and the maximum duration
                     const maxDurationMs = maxDuration * 24 * 60 * 60 * 1000;
                     const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
 

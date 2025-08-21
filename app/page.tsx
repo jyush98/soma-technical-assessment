@@ -1,24 +1,20 @@
 // app/page.tsx
 "use client"
-import { Todo } from '@prisma/client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import TodoItem from '@/components/ToDoItem';
 import AddToDoForm from '@/components/AddToDoForm';
 import EmptyState from '@/components/EmptyState';
 import DependencyGraph from '@/components/DependencyGraph';
+import { TodoWithRelations } from '@/lib/types';
 
 export default function Home() {
-  const [todos, setTodos] = useState<Todo[]>([]);
+  const [todos, setTodos] = useState<TodoWithRelations[]>([]);
   const [isAddingTodo, setIsAddingTodo] = useState(false);
-  const [criticalPath, setCriticalPath] = useState<number[]>([]);
   const [showGraph, setShowGraph] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
-  useEffect(() => {
-    fetchTodos();
-    fetchCriticalPath();
-  }, []);
-
-  const fetchTodos = async () => {
+  // Single fetch function that gets todos with all critical path info
+  const fetchTodos = useCallback(async () => {
     try {
       const res = await fetch('/api/todos');
       const data = await res.json();
@@ -26,21 +22,12 @@ export default function Home() {
     } catch (error) {
       console.error('Failed to fetch todos:', error);
     }
-  };
+  }, []);
 
-  const fetchCriticalPath = async () => {
-    try {
-      const res = await fetch('/api/todos/critical-path');
-      const data = await res.json();
-      if (data.isValid) {
-        setCriticalPath(data.criticalPath || []);
-      }
-    } catch (error) {
-      console.error('Failed to fetch critical path:', error);
-    }
-  };
+  useEffect(() => {
+    fetchTodos();
+  }, [fetchTodos]);
 
-  // Updated to handle all the new fields
   const handleAddTodo = async (
     title: string,
     dueDate: string | null,
@@ -48,8 +35,9 @@ export default function Home() {
     dependencies: number[]
   ) => {
     setIsAddingTodo(true);
+    setIsRecalculating(true);
     try {
-      await fetch('/api/todos', {
+      const response = await fetch('/api/todos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -59,31 +47,50 @@ export default function Home() {
           dependencies
         }),
       });
-      await fetchTodos();
-      await fetchCriticalPath();
+
+      if (response.ok) {
+        const data = await response.json();
+        // The backend now returns all todos with updated critical path
+        if (data.todos) {
+          setTodos(data.todos);
+        } else {
+          // Fallback to fetching if response format is different
+          await fetchTodos();
+        }
+      } else {
+        throw new Error('Failed to add todo');
+      }
     } catch (error) {
       console.error('Failed to add todo:', error);
+      // On error, still try to fetch to ensure UI is in sync
+      await fetchTodos();
     } finally {
       setIsAddingTodo(false);
+      setIsRecalculating(false);
     }
   };
 
   const handleDeleteTodo = async (id: number) => {
+    setIsRecalculating(true);
     try {
       await fetch(`/api/todos/${id}`, {
         method: 'DELETE',
       });
+      // Critical path is recalculated on backend, just fetch updated todos
       await fetchTodos();
-      await fetchCriticalPath();
     } catch (error) {
       console.error('Failed to delete todo:', error);
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
-  const handleUpdate = async () => {
+  // This is called when any todo is updated (completion, edit, dependencies)
+  const handleUpdate = useCallback(async () => {
+    setIsRecalculating(true);
     await fetchTodos();
-    await fetchCriticalPath();
-  };
+    setIsRecalculating(false);
+  }, [fetchTodos]);
 
   const handleImageUpdate = (todoId: number, imageData: { imageUrl: string; imageAlt: string }) => {
     setTodos(prevTodos =>
@@ -96,22 +103,57 @@ export default function Home() {
   };
 
   const handleRecalculateCriticalPath = async () => {
+    setIsRecalculating(true);
     try {
       await fetch('/api/todos/critical-path', { method: 'POST' });
-      await handleUpdate();
+      await fetchTodos();
     } catch (error) {
       console.error('Failed to recalculate critical path:', error);
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
+  // Derive critical path info from todos  
+  const criticalPath = todos.filter(todo => todo.isOnCriticalPath).map(t => t.id);
   const criticalPathTasks = todos.filter(todo => todo.isOnCriticalPath);
-  const totalEstimatedDays = criticalPathTasks.reduce((sum, todo) => sum + (todo.estimatedDays || 1), 0);
+
+  // Calculate project duration based on critical path
+  // The project ends when the last task finishes
+  let totalEstimatedDays = 0;
+
+  if (todos.length > 0) {
+    // Find the maximum finish time across all tasks
+    // This represents the actual project completion time
+    const taskFinishTimes = todos.map(task => {
+      if (task.earliestStartDate) {
+        // Task has a calculated start date from dependencies
+        const startMs = new Date(task.earliestStartDate).getTime();
+        const durationMs = (task.estimatedDays || 1) * 24 * 60 * 60 * 1000;
+        return startMs + durationMs;
+      } else {
+        // Independent task starting at day 0
+        return (task.estimatedDays || 1) * 24 * 60 * 60 * 1000;
+      }
+    });
+
+    if (taskFinishTimes.length > 0) {
+      const maxFinishTime = Math.max(...taskFinishTimes);
+      // Find the earliest start time (project start)
+      const projectStartTime = Math.min(...todos
+        .filter(t => !t.dependencies || t.dependencies.length === 0)
+        .map(t => t.earliestStartDate ? new Date(t.earliestStartDate).getTime() : 0));
+
+      // Project duration in days
+      totalEstimatedDays = Math.ceil((maxFinishTime - projectStartTime) / (24 * 60 * 60 * 1000));
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/40">
       <div className="container mx-auto px-6 py-12 max-w-7xl">
 
-        {/* Enhanced Header Section */}
+        {/* Header Section */}
         <div className="text-center mb-16">
           <h1 className="text-5xl font-light text-gray-800 mb-4 tracking-tight">
             Task Manager
@@ -121,7 +163,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Enhanced Critical Path Summary */}
+        {/* Critical Path Summary with loading indicator */}
         {criticalPathTasks.length > 0 && (
           <div className="mb-12">
             <div className="bg-gradient-to-r from-red-500 to-pink-600 p-6 rounded-2xl shadow-lg text-white relative overflow-hidden">
@@ -135,7 +177,14 @@ export default function Home() {
                     <svg className="w-6 h-6 mr-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
-                    <h3 className="text-xl font-semibold">Critical Path Analysis</h3>
+                    <h3 className="text-xl font-semibold">
+                      Critical Path Analysis
+                      {isRecalculating && (
+                        <span className="ml-3 text-sm font-normal opacity-90">
+                          (Recalculating...)
+                        </span>
+                      )}
+                    </h3>
                   </div>
                   <p className="text-red-100">
                     <span className="font-medium">{criticalPathTasks.length}</span> critical task{criticalPathTasks.length !== 1 ? 's' : ''} •
@@ -151,9 +200,20 @@ export default function Home() {
                   </button>
                   <button
                     onClick={handleRecalculateCriticalPath}
-                    className="px-6 py-3 bg-white text-red-600 hover:bg-red-50 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+                    disabled={isRecalculating}
+                    className="px-6 py-3 bg-white text-red-600 hover:bg-red-50 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Recalculate
+                    {isRecalculating ? (
+                      <span className="flex items-center">
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Recalculating...
+                      </span>
+                    ) : (
+                      'Recalculate'
+                    )}
                   </button>
                 </div>
               </div>
@@ -196,12 +256,12 @@ export default function Home() {
             <AddToDoForm
               onAddTodo={handleAddTodo}
               isLoading={isAddingTodo}
-              existingTodos={todos} // Pass existing todos for dependency selection
+              existingTodos={todos}
             />
           </div>
         </div>
 
-        {/* Enhanced Todo List Section */}
+        {/* Todo List Section */}
         <div className="mb-12">
           {todos.length === 0 ? (
             <div className="flex justify-center">
@@ -213,12 +273,13 @@ export default function Home() {
                 <h2 className="text-2xl font-semibold text-gray-800">Your Tasks</h2>
                 <div className="text-sm text-gray-500">
                   {todos.length} total • {todos.filter(t => t.completed).length} completed
+                  {isRecalculating && ' • Updating critical path...'}
                 </div>
               </div>
 
-              {/* Improved grid with better spacing */}
+              {/* Todo grid */}
               <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-8">
-                {todos.map((todo: Todo) => (
+                {todos.map((todo) => (
                   <TodoItem
                     key={todo.id}
                     todo={todo}
@@ -233,7 +294,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Enhanced Stats Section */}
+        {/* Stats Section */}
         {todos.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200/60 hover:shadow-xl transition-shadow duration-300">
@@ -288,10 +349,11 @@ export default function Home() {
                   </svg>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-gray-900 text-lg">Project Duration</h4>
+                  <h4 className="font-semibold text-gray-900 text-lg">Min Duration</h4>
                   <p className="text-3xl font-light text-purple-600 mt-1">
-                    {totalEstimatedDays} days
+                    {totalEstimatedDays || 0} days
                   </p>
+                  <p className="text-xs text-gray-500 mt-1">critical path</p>
                 </div>
               </div>
             </div>

@@ -1,4 +1,44 @@
-// app/api/todos/route.ts
+// Helper function to recalculate critical path and update database
+async function recalculateCriticalPath() {
+  const todos = await prisma.todo.findMany({
+    include: {
+      dependencies: { select: { dependsOnId: true } },
+      dependents: { select: { todoId: true } }
+    }
+  });
+
+  // Transform to match algorithm interface
+  const todosForCalculation = todos.map(t => ({
+    id: t.id,
+    title: t.title,
+    completed: t.completed,
+    estimatedDays: t.estimatedDays || 1,
+    dependencies: t.dependencies,
+    dependents: t.dependents,
+    earliestStartDate: t.earliestStartDate,
+    criticalPathLength: 0,
+    isOnCriticalPath: t.isOnCriticalPath
+  }));
+
+  const { DependencyGraphService } = await import('@/lib/dependency-graph');
+  const result = DependencyGraphService.calculateCriticalPath(todosForCalculation);
+
+  if (result.isValid && result.scheduleData) {
+    // Update todos with critical path information in a single transaction
+    const updatePromises = Object.entries(result.scheduleData).map(
+      ([todoId, scheduleInfo]) =>
+        prisma.todo.update({
+          where: { id: parseInt(todoId) },
+          data: {
+            earliestStartDate: scheduleInfo.earliestStart,
+            isOnCriticalPath: scheduleInfo.isOnCriticalPath
+          }
+        })
+    );
+
+    await prisma.$transaction(updatePromises);
+  }
+}// app/api/todos/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
@@ -104,8 +144,29 @@ export async function POST(request: Request) {
     if (result) {
       generateImageForTodo(result.id, result.title);
     }
+    // Recalculate critical path after adding new todo
+    await recalculateCriticalPath();
 
-    return NextResponse.json(result, { status: 201 });
+    // Return ALL todos with updated critical path info
+    // This ensures the frontend gets the complete updated state
+    const allTodos = await prisma.todo.findMany({
+      include: {
+        dependencies: true,
+        dependents: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    if (!result) {
+      return NextResponse.json({ error: 'Failed to create todo' }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      newTodo: result.id,  // Include the ID of the newly created todo
+      todos: allTodos       // Return all todos with updated critical path
+    }, { status: 201 });
   } catch (error) {
     console.error('Error creating todo:', error);
     return NextResponse.json({
