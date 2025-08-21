@@ -5,247 +5,171 @@ import { useCallback, useEffect, useState } from 'react';
 import ReactFlow, {
     Node,
     Edge,
-    addEdge,
-    Connection,
-    useNodesState,
-    useEdgesState,
     Controls,
     Background,
-    MiniMap,
-    ReactFlowProvider,
-    Position,
-    BackgroundVariant,
-    MarkerType
+    useNodesState,
+    useEdgesState,
+    ConnectionMode,
+    MarkerType,
+    BackgroundVariant
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-
-interface Todo {
-    id: number;
-    title: string;
-    completed: boolean;
-    isOnCriticalPath?: boolean;
-    estimatedDays?: number | null;
-}
-
-interface TodoDependency {
-    id: number;
-    todoId: number;
-    dependsOnId: number;
-}
+import { TodoWithRelations } from '@/lib/types';
 
 interface DependencyGraphProps {
-    todos: Todo[];
+    todos: TodoWithRelations[];
     criticalPath: number[];
     onUpdate: () => void;
 }
 
-function DependencyGraph({ todos, criticalPath, onUpdate }: DependencyGraphProps) {
-    const [nodes, setNodes, onNodesChange] = useNodesState([]);
-    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-    const [dependencies, setDependencies] = useState<TodoDependency[]>([]);
+// Hierarchical layout algorithm
+function getHierarchicalLayout(todos: TodoWithRelations[], criticalPath: number[]): { nodes: Node[], edges: Edge[] } {
+    const nodes: Node[] = [];
+    const edges: Edge[] = [];
 
-    // Fetch all dependencies
-    useEffect(() => {
-        const fetchAllDependencies = async () => {
-            try {
-                const dependencyPromises = todos.map(todo =>
-                    fetch(`/api/todos/${todo.id}/dependencies`).then(res => res.json())
-                );
-                const dependencyResults = await Promise.all(dependencyPromises);
+    // Create a map of todo ID to its level in the hierarchy
+    const levels = new Map<number, number>();
+    const todoMap = new Map(todos.map(t => [t.id, t]));
 
-                const allDependencies = dependencyResults.flat();
-                setDependencies(allDependencies);
-            } catch (error) {
-                console.error('Error fetching dependencies:', error);
+    // Calculate levels using topological sort approach
+    const calculateLevel = (todoId: number, visited = new Set<number>()): number => {
+        if (levels.has(todoId)) return levels.get(todoId)!;
+        if (visited.has(todoId)) return 0; // Cycle detection
+
+        visited.add(todoId);
+        const todo = todoMap.get(todoId);
+        if (!todo) return 0;
+
+        let maxDependencyLevel = -1;
+        if (todo.dependencies && todo.dependencies.length > 0) {
+            for (const dep of todo.dependencies) {
+                const depLevel = calculateLevel(dep.dependsOnId, visited);
+                maxDependencyLevel = Math.max(maxDependencyLevel, depLevel);
             }
-        };
-
-        if (todos.length > 0) {
-            fetchAllDependencies();
         }
-    }, [todos]);
 
-    // Convert todos to React Flow nodes
-    const createNodes = useCallback((): Node[] => {
-        return todos.map((todo, index) => {
+        const level = maxDependencyLevel + 1;
+        levels.set(todoId, level);
+        return level;
+    };
+
+    // Calculate levels for all todos
+    todos.forEach(todo => calculateLevel(todo.id));
+
+    // Group todos by level
+    const todosByLevel = new Map<number, TodoWithRelations[]>();
+    todos.forEach(todo => {
+        const level = levels.get(todo.id) || 0;
+        if (!todosByLevel.has(level)) {
+            todosByLevel.set(level, []);
+        }
+        todosByLevel.get(level)!.push(todo);
+    });
+
+    // Position nodes
+    const levelWidth = 250;
+    const nodeHeight = 100;
+    const nodeSpacing = 120;
+
+    todosByLevel.forEach((todosAtLevel, level) => {
+        todosAtLevel.forEach((todo, index) => {
             const isOnCriticalPath = criticalPath.includes(todo.id);
-            const col = index % 4;
-            const row = Math.floor(index / 4);
 
-            return {
+            // Calculate y position to center nodes at each level
+            const totalHeight = todosAtLevel.length * nodeSpacing;
+            const startY = -totalHeight / 2;
+            const y = startY + index * nodeSpacing;
+
+            nodes.push({
                 id: todo.id.toString(),
-                type: 'default',
                 position: {
-                    x: col * 250,
-                    y: row * 120
+                    x: level * levelWidth,
+                    y: y
                 },
                 data: {
                     label: (
-                        <div className={`p-3 rounded-lg shadow-sm border-2 min-w-[200px] ${isOnCriticalPath
-                                ? 'bg-red-100 border-red-400 text-red-800'
-                                : todo.completed
-                                    ? 'bg-green-100 border-green-400 text-green-800'
-                                    : 'bg-blue-100 border-blue-400 text-blue-800'
-                            }`}>
-                            <div className="font-medium text-sm mb-1 truncate" title={todo.title}>
-                                {todo.title}
-                            </div>
-                            <div className="text-xs opacity-75">
+                        <div className="text-center">
+                            <div className="font-semibold">{todo.title}</div>
+                            <div className="text-xs mt-1">
                                 {todo.estimatedDays} day{todo.estimatedDays !== 1 ? 's' : ''}
                             </div>
-                            {isOnCriticalPath && (
-                                <div className="text-xs font-bold mt-1">CRITICAL</div>
-                            )}
                             {todo.completed && (
-                                <div className="text-xs font-bold mt-1">DONE</div>
+                                <div className="text-xs text-green-600 mt-1">✓ Completed</div>
                             )}
                         </div>
                     )
                 },
-                sourcePosition: Position.Right,
-                targetPosition: Position.Left,
                 style: {
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0
-                }
-            };
-        });
-    }, [todos, criticalPath]);
-
-    // Convert dependencies to React Flow edges
-    const createEdges = useCallback((): Edge[] => {
-        return dependencies.map(dep => {
-            const isOnCriticalPath =
-                criticalPath.includes(dep.todoId) && criticalPath.includes(dep.dependsOnId);
-
-            return {
-                id: `${dep.dependsOnId}-${dep.todoId}`,
-                source: dep.dependsOnId.toString(),
-                target: dep.todoId.toString(),
-                type: 'smoothstep',
-                animated: isOnCriticalPath,
-                style: {
-                    stroke: isOnCriticalPath ? '#dc2626' : '#6b7280',
-                    strokeWidth: isOnCriticalPath ? 3 : 2,
+                    background: isOnCriticalPath ? '#fee2e2' : todo.completed ? '#e6ffed' : '#f3f4f6',
+                    border: isOnCriticalPath ? '2px solid #dc2626' : todo.completed ? '2px solid #16a34a' : '1px solid #9ca3af',
+                    borderRadius: '8px',
+                    padding: '10px',
+                    width: 180,
+                    fontSize: '14px',
                 },
-                markerEnd: {
-                    type: MarkerType.Arrow,
-                    color: isOnCriticalPath ? '#dc2626' : '#6b7280',
-                },
-            };
+            });
         });
-    }, [dependencies, criticalPath]);
+    });
 
-    // Update nodes and edges when dependencies change
+    // Create edges
+    todos.forEach(todo => {
+        if (todo.dependencies) {
+            todo.dependencies.forEach(dep => {
+                const isOnCriticalPath =
+                    criticalPath.includes(todo.id) &&
+                    criticalPath.includes(dep.dependsOnId);
+
+                edges.push({
+                    id: `${dep.dependsOnId}-${todo.id}`,
+                    source: dep.dependsOnId.toString(),
+                    target: todo.id.toString(),
+                    type: 'smoothstep',
+                    animated: isOnCriticalPath,
+                    style: {
+                        stroke: isOnCriticalPath ? '#dc2626' : '#9ca3af',
+                        strokeWidth: isOnCriticalPath ? 2 : 1,
+                    },
+                    markerEnd: {
+                        type: MarkerType.ArrowClosed,
+                        color: isOnCriticalPath ? '#dc2626' : '#9ca3af',
+                    },
+                });
+            });
+        }
+    });
+
+    return { nodes, edges };
+}
+
+export default function DependencyGraph({ todos, criticalPath, onUpdate }: DependencyGraphProps) {
+    const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
     useEffect(() => {
-        setNodes(createNodes());
-        setEdges(createEdges());
-    }, [createNodes, createEdges]);
-
-    // Handle new connections (adding dependencies)
-    const onConnect = useCallback(
-        async (params: Connection) => {
-            if (params.source && params.target) {
-                try {
-                    const res = await fetch(`/api/todos/${params.target}/dependencies`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ dependsOnId: parseInt(params.source) })
-                    });
-
-                    if (!res.ok) {
-                        const errorData = await res.json();
-                        alert(errorData.message || 'Failed to add dependency');
-                        return;
-                    }
-
-                    onUpdate();
-                } catch (error) {
-                    console.error('Error adding dependency:', error);
-                    alert('Failed to add dependency');
-                }
-            }
-        },
-        [onUpdate]
-    );
-
-    // Handle edge deletion (removing dependencies)
-    const onEdgeClick = useCallback(
-        async (event: React.MouseEvent, edge: Edge) => {
-            event.stopPropagation();
-
-            if (confirm('Remove this dependency?')) {
-                try {
-                    const res = await fetch(
-                        `/api/todos/${edge.target}/dependencies?dependsOnId=${edge.source}`,
-                        { method: 'DELETE' }
-                    );
-
-                    if (!res.ok) {
-                        throw new Error('Failed to remove dependency');
-                    }
-
-                    onUpdate();
-                } catch (error) {
-                    console.error('Error removing dependency:', error);
-                    alert('Failed to remove dependency');
-                }
-            }
-        },
-        [onUpdate]
-    );
-
-    if (todos.length === 0) {
-        return (
-            <div className="w-full h-96 border rounded-lg bg-gray-50 flex items-center justify-center">
-                <p className="text-gray-500">No tasks to display</p>
-            </div>
-        );
-    }
+        const { nodes: layoutNodes, edges: layoutEdges } = getHierarchicalLayout(todos, criticalPath);
+        setNodes(layoutNodes);
+        setEdges(layoutEdges);
+    }, [todos, criticalPath, setNodes, setEdges]);
 
     return (
-        <div className="w-full h-96 border rounded-lg bg-white">
+        <div style={{ width: '100%', height: '500px' }}>
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                onEdgeClick={onEdgeClick}
+                connectionMode={ConnectionMode.Loose}
                 fitView
-                attributionPosition="bottom-left"
+                fitViewOptions={{ padding: 0.2 }}
                 nodesDraggable={true}
-                nodesConnectable={true}
+                nodesConnectable={false}
                 elementsSelectable={true}
+                minZoom={0.5}
+                maxZoom={1.5}
             >
                 <Controls />
-                <MiniMap
-                    className="!bg-gray-100"
-                    nodeColor={(node) => {
-                        const isOnCriticalPath = criticalPath.includes(parseInt(node.id));
-                        return isOnCriticalPath ? '#dc2626' : '#3b82f6';
-                    }}
-                />
                 <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
             </ReactFlow>
-
-            {/* Instructions */}
-            <div className="p-3 bg-gray-50 border-t text-sm text-gray-600">
-                <p>
-                    <strong>Instructions:</strong> Drag to connect tasks (dependency flows left to right).
-                    Click edges to remove dependencies. Red paths show the critical path.
-                </p>
-            </div>
         </div>
-    );
-}
-
-// Wrapper component with ReactFlowProvider
-export default function DependencyGraphWithProvider(props: DependencyGraphProps) {
-    return (
-        <ReactFlowProvider>
-            <DependencyGraph {...props} />
-        </ReactFlowProvider>
     );
 }
