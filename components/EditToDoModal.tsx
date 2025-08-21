@@ -1,8 +1,9 @@
 // components/EditToDoModal.tsx
 'use client';
 
-import { TodoWithRelations } from '@/lib/types';
 import { useState, useEffect } from 'react';
+import { TodoWithRelations } from '@/lib/types';
+import { DependencyGraphService } from '@/lib/dependency-graph';
 
 interface EditToDoModalProps {
     todo: TodoWithRelations;
@@ -21,8 +22,9 @@ export default function EditToDoModal({
 }: EditToDoModalProps) {
     const [title, setTitle] = useState(todo.title);
     const [dueDate, setDueDate] = useState('');
-    const [estimatedDays, setEstimatedDays] = useState(todo.estimatedDays || 1);
+    const [estimatedDays, setEstimatedDays] = useState<number | ''>(todo.estimatedDays || 1);
     const [selectedDependencies, setSelectedDependencies] = useState<number[]>([]);
+    const [invalidDependencies, setInvalidDependencies] = useState<Set<number>>(new Set());
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -31,6 +33,7 @@ export default function EditToDoModal({
         if (isOpen) {
             setTitle(todo.title);
             setEstimatedDays(todo.estimatedDays || 1);
+            setError(null); // Clear any previous errors
 
             // Format date for input
             if (todo.dueDate) {
@@ -53,10 +56,56 @@ export default function EditToDoModal({
                 const data = await response.json();
                 const depIds = data.dependencies?.map((dep: any) => dep.dependsOnId) || [];
                 setSelectedDependencies(depIds);
+
+                // Check which dependencies would create cycles
+                checkInvalidDependencies(depIds);
             }
         } catch (error) {
             console.error('Failed to fetch dependencies:', error);
         }
+    };
+
+    const checkInvalidDependencies = (currentDeps: number[]) => {
+        const invalid = new Set<number>();
+
+        // Transform todos to match the DependencyGraphService interface
+        const todosForValidation = allTodos.map(t => ({
+            id: t.id,
+            title: t.title,
+            completed: t.completed,
+            estimatedDays: t.estimatedDays || 1,
+            dependencies: t.dependencies || [],
+            dependents: t.dependents || [],
+            earliestStartDate: t.earliestStartDate,
+            criticalPathLength: 0,
+            isOnCriticalPath: t.isOnCriticalPath,
+            dueDate: t.dueDate
+        }));
+
+        // Check each available todo to see if it would create a cycle
+        allTodos.forEach(availableTodo => {
+            if (availableTodo.id === todo.id || availableTodo.completed) {
+                return; // Skip self and completed todos
+            }
+
+            // Skip if already selected (don't re-validate existing dependencies)
+            if (currentDeps.includes(availableTodo.id)) {
+                return;
+            }
+
+            // Check if adding this dependency would create a cycle
+            const validation = DependencyGraphService.validateDependency(
+                todosForValidation,
+                todo.id,
+                availableTodo.id
+            );
+
+            if (!validation.isValid) {
+                invalid.add(availableTodo.id);
+            }
+        });
+
+        setInvalidDependencies(invalid);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -72,12 +121,13 @@ export default function EditToDoModal({
                 body: JSON.stringify({
                     title,
                     dueDate: dueDate || null,
-                    estimatedDays,
+                    estimatedDays: estimatedDays === '' ? 1 : estimatedDays,
                 }),
             });
 
             if (!response.ok) {
-                throw new Error('Failed to update todo');
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to update todo');
             }
 
             // Then update dependencies
@@ -88,9 +138,9 @@ export default function EditToDoModal({
 
             // Close modal
             onClose();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error updating todo:', error);
-            setError('Failed to update task. Please try again.');
+            setError(error.message || 'Failed to update task. Please try again.');
         } finally {
             setIsLoading(false);
         }
@@ -116,8 +166,25 @@ export default function EditToDoModal({
                 });
 
                 if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to add dependency');
+                    const errorData = await response.json();
+
+                    // Check if it's a circular dependency error
+                    if (response.status === 400 && (errorData.cycle || errorData.message?.includes('circular'))) {
+                        // Get task titles for better error message
+                        const cycle = errorData.cycle || [];
+                        const cycleTasks = cycle.map((id: number) => {
+                            const task = allTodos.find(t => t.id === id);
+                            return task ? task.title : `Task ${id}`;
+                        });
+
+                        throw new Error(
+                            `Cannot add dependency - it would create a circular reference:\n` +
+                            `${cycleTasks.join(' → ')}\n\n` +
+                            `Tasks cannot depend on each other in a circle.`
+                        );
+                    }
+
+                    throw new Error(errorData.message || errorData.error || 'Failed to add dependency');
                 }
             }
 
@@ -128,7 +195,8 @@ export default function EditToDoModal({
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to remove dependency');
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to remove dependency');
                 }
             }
         } catch (error) {
@@ -138,11 +206,19 @@ export default function EditToDoModal({
     };
 
     const handleDependencyToggle = (todoId: number) => {
-        setSelectedDependencies(prev =>
-            prev.includes(todoId)
-                ? prev.filter(id => id !== todoId)
-                : [...prev, todoId]
-        );
+        // Don't allow toggling invalid dependencies
+        if (invalidDependencies.has(todoId)) {
+            return;
+        }
+
+        const newDeps = selectedDependencies.includes(todoId)
+            ? selectedDependencies.filter(id => id !== todoId)
+            : [...selectedDependencies, todoId];
+
+        setSelectedDependencies(newDeps);
+
+        // Re-check invalid dependencies with the new selection
+        checkInvalidDependencies(newDeps);
     };
 
     if (!isOpen) return null;
@@ -185,7 +261,12 @@ export default function EditToDoModal({
                         {/* Error message */}
                         {error && (
                             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-                                {error}
+                                <div className="flex">
+                                    <svg className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                    <div className="whitespace-pre-wrap">{error}</div>
+                                </div>
                             </div>
                         )}
 
@@ -234,7 +315,16 @@ export default function EditToDoModal({
                                 type="number"
                                 id="estimatedDays"
                                 value={estimatedDays}
-                                onChange={(e) => setEstimatedDays(parseInt(e.target.value) || 1)}
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    // Allow empty string for backspacing, but enforce minimum 1 on blur
+                                    setEstimatedDays(value === '' ? '' as any : parseInt(value) || 1);
+                                }}
+                                onBlur={(e) => {
+                                    // Enforce minimum of 1 when user leaves the field
+                                    const value = parseInt(e.target.value) || 1;
+                                    setEstimatedDays(Math.max(1, Math.min(365, value)));
+                                }}
                                 min="1"
                                 max="365"
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
@@ -247,6 +337,11 @@ export default function EditToDoModal({
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                 Dependencies
+                                {selectedDependencies.length > 0 && (
+                                    <span className="ml-2 text-xs text-gray-500">
+                                        ({selectedDependencies.length} selected)
+                                    </span>
+                                )}
                             </label>
                             {availableTodos.length === 0 ? (
                                 <p className="text-sm text-gray-500 italic">
@@ -254,28 +349,63 @@ export default function EditToDoModal({
                                 </p>
                             ) : (
                                 <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3 space-y-2">
-                                    {availableTodos.map(t => (
-                                        <label
-                                            key={t.id}
-                                            className="flex items-center p-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedDependencies.includes(t.id)}
-                                                onChange={() => handleDependencyToggle(t.id)}
-                                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                                disabled={isLoading}
-                                            />
-                                            <span className="ml-3 text-sm text-gray-700">
-                                                {t.title}
-                                                {t.estimatedDays && (
-                                                    <span className="text-gray-500 ml-2">
-                                                        ({t.estimatedDays} days)
+                                    {/* Show selected dependencies first */}
+                                    {availableTodos
+                                        .sort((a, b) => {
+                                            // Selected items first
+                                            const aSelected = selectedDependencies.includes(a.id);
+                                            const bSelected = selectedDependencies.includes(b.id);
+                                            if (aSelected && !bSelected) return -1;
+                                            if (!aSelected && bSelected) return 1;
+                                            // Then invalid items last
+                                            const aInvalid = invalidDependencies.has(a.id);
+                                            const bInvalid = invalidDependencies.has(b.id);
+                                            if (aInvalid && !bInvalid) return 1;
+                                            if (!aInvalid && bInvalid) return -1;
+                                            return 0;
+                                        })
+                                        .map(t => {
+                                            const isInvalid = invalidDependencies.has(t.id);
+                                            const isSelected = selectedDependencies.includes(t.id);
+
+                                            return (
+                                                <label
+                                                    key={t.id}
+                                                    className={`flex items-center p-2 rounded-lg transition-colors ${isInvalid
+                                                            ? 'bg-gray-50 cursor-not-allowed opacity-60'
+                                                            : isSelected
+                                                                ? 'bg-blue-50 hover:bg-blue-100 cursor-pointer'
+                                                                : 'hover:bg-gray-50 cursor-pointer'
+                                                        }`}
+                                                    title={isInvalid ? 'Would create circular dependency' : ''}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleDependencyToggle(t.id)}
+                                                        className={`w-4 h-4 border-gray-300 rounded focus:ring-blue-500 ${isInvalid
+                                                                ? 'text-gray-400 cursor-not-allowed'
+                                                                : 'text-blue-600'
+                                                            }`}
+                                                        disabled={isLoading || isInvalid}
+                                                    />
+                                                    <span className={`ml-3 text-sm ${isInvalid ? 'text-gray-500' : 'text-gray-700'
+                                                        }`}>
+                                                        {t.title}
+                                                        {t.estimatedDays && (
+                                                            <span className="text-gray-500 ml-2">
+                                                                ({t.estimatedDays} days)
+                                                            </span>
+                                                        )}
+                                                        {isInvalid && (
+                                                            <span className="ml-2 text-xs text-red-600">
+                                                                (would create cycle)
+                                                            </span>
+                                                        )}
                                                     </span>
-                                                )}
-                                            </span>
-                                        </label>
-                                    ))}
+                                                </label>
+                                            );
+                                        })}
                                 </div>
                             )}
                         </div>
