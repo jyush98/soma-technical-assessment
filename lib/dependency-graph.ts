@@ -35,6 +35,7 @@ export interface DependencyGraphResult {
 export class DependencyGraphService {
     /**
      * Validates a proposed dependency addition for circular references
+     * Time Complexity: O(V + E) where V = vertices (tasks), E = edges (dependencies)
      */
     static validateDependency(
         todos: TodoWithDependencies[],
@@ -77,7 +78,9 @@ export class DependencyGraphService {
     }
 
     /**
-     * Calculates critical path and earliest start dates
+     * Calculates critical path using the Critical Path Method (CPM)
+     * Time Complexity: O(V + E) for topological sort + O(V) for forward/backward passes
+     * Space Complexity: O(V) for storing schedule data
      */
     static calculateCriticalPath(
         todos: TodoWithDependencies[]
@@ -145,7 +148,8 @@ export class DependencyGraphService {
     }
 
     /**
-     * Detect cycles using Depth-First Search
+     * Detect cycles using Depth-First Search (DFS)
+     * Uses recursion stack to track current path and detect back edges
      */
     private static detectCycleDFS(
         node: number,
@@ -217,10 +221,10 @@ export class DependencyGraphService {
 
     /**
      * Topological sort using Kahn's algorithm
+     * Processes nodes in dependency order (dependencies before dependents)
      */
     private static topologicalSort(todos: TodoWithDependencies[]): number[] | null {
         const inDegree: { [todoId: number]: number } = {};
-        const adjacencyList = this.buildAdjacencyList(todos);
 
         // Initialize in-degrees
         todos.forEach(todo => {
@@ -265,6 +269,7 @@ export class DependencyGraphService {
 
     /**
      * Calculate earliest start and finish times (forward pass)
+     * Propagates earliest possible times through the dependency network
      */
     private static calculateForwardPass(
         todos: TodoWithDependencies[],
@@ -274,7 +279,7 @@ export class DependencyGraphService {
         const todoMap = new Map(todos.map(t => [t.id, t]));
         const baseTime = new Date();
 
-        // Initialize all start times
+        // Initialize all schedule data
         todos.forEach(todo => {
             scheduleData[todo.id] = {
                 earliestStart: new Date(baseTime),
@@ -301,7 +306,7 @@ export class DependencyGraphService {
 
             // Set earliest times
             scheduleData[todoId].earliestStart = new Date(maxPredecessorFinish);
-            const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000; // Convert days to milliseconds
+            const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
             scheduleData[todoId].earliestFinish = new Date(
                 maxPredecessorFinish.getTime() + durationMs
             );
@@ -311,7 +316,8 @@ export class DependencyGraphService {
     }
 
     /**
-     * Calculate latest start and finish times (backward pass)
+     * Calculate latest start and finish times (backward pass) using standard CPM
+     * Fixed to properly propagate critical path through dependency chain
      */
     private static calculateBackwardPass(
         todos: TodoWithDependencies[],
@@ -320,106 +326,86 @@ export class DependencyGraphService {
     ) {
         const todoMap = new Map(todos.map(t => [t.id, t]));
 
-        // Find project end time (latest finish of all tasks)
+        // Find project end time (latest earliest finish of all tasks)
         const projectEndTime = Math.max(
             ...Object.values(scheduleData).map((data: any) => data.earliestFinish.getTime())
         );
 
-        // Process in reverse topological order
+        // Process in reverse topological order (end tasks first)
         const reverseOrder = [...topologicalOrder].reverse();
 
         reverseOrder.forEach(todoId => {
             const todo = todoMap.get(todoId)!;
 
-            // Find tasks that depend on this task
-            const dependentTasks = todos.filter(t =>
+            // Find all tasks that depend on this task (successors)
+            const successorTasks = todos.filter(t =>
                 t.dependencies.some(dep => dep.dependsOnId === todoId)
             );
 
-            if (dependentTasks.length === 0) {
-                // If this is an end task (no dependents), set latest finish to project end
+            if (successorTasks.length === 0) {
+                // End task - no successors, set latest finish to project end
                 scheduleData[todoId].latestFinish = new Date(projectEndTime);
             } else {
-                // Find earliest latest start of all dependents
-                let minSuccessorStart = new Date(projectEndTime);
-                dependentTasks.forEach(dependent => {
-                    const depStart = scheduleData[dependent.id].latestStart;
-                    if (depStart < minSuccessorStart) {
-                        minSuccessorStart = new Date(depStart);
+                // Find the earliest latest start time among all successors
+                let earliestSuccessorLatestStart = new Date(projectEndTime);
+
+                successorTasks.forEach(successor => {
+                    const successorLatestStart = scheduleData[successor.id].latestStart;
+                    if (successorLatestStart.getTime() < earliestSuccessorLatestStart.getTime()) {
+                        earliestSuccessorLatestStart = new Date(successorLatestStart);
                     }
                 });
-                scheduleData[todoId].latestFinish = new Date(minSuccessorStart);
+
+                // This task's latest finish must be no later than its earliest successor's latest start
+                scheduleData[todoId].latestFinish = new Date(earliestSuccessorLatestStart);
             }
 
-            // Calculate latest start
+            // Calculate latest start based on latest finish and duration
             const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
             scheduleData[todoId].latestStart = new Date(
                 scheduleData[todoId].latestFinish.getTime() - durationMs
             );
 
-            // Calculate slack
+            // Calculate total float (slack)
             scheduleData[todoId].slack =
                 scheduleData[todoId].latestStart.getTime() - scheduleData[todoId].earliestStart.getTime();
 
-            // Critical path tasks have zero slack
-            scheduleData[todoId].isOnCriticalPath = scheduleData[todoId].slack === 0;
+            // Task is on critical path if it has zero slack (within small tolerance for floating point)
+            scheduleData[todoId].isOnCriticalPath = Math.abs(scheduleData[todoId].slack) < 1000; // 1 second tolerance
         });
 
-        // Handle mixed scenarios: tasks with and without dependencies
+        // Handle special case: all tasks are independent (no dependencies at all)
         const hasAnyDependencies = todos.some(t => t.dependencies.length > 0);
 
-        if (hasAnyDependencies) {
-            // Mixed case: handle independent tasks separately
-            const independentTasks = todos.filter(t => t.dependencies.length === 0);
-            const dependentTasks = todos.filter(t => t.dependencies.length > 0);
-
-            if (independentTasks.length > 0) {
-                // Find the critical path length from dependent tasks
-                const criticalPathLengthMs = dependentTasks.length > 0
-                    ? Math.max(...dependentTasks.map(t => scheduleData[t.id].earliestFinish.getTime()))
-                    : 0;
-
-                const criticalPathLengthDays = criticalPathLengthMs / (24 * 60 * 60 * 1000);
-
-                independentTasks.forEach(todo => {
-                    // Independent tasks are critical only if they're as long as the critical path
-                    const shouldBeCritical = todo.estimatedDays >= criticalPathLengthDays;
-                    scheduleData[todo.id].isOnCriticalPath = shouldBeCritical;
-
-                    if (!shouldBeCritical) {
-                        // Calculate slack: how much time they have within the project duration
-                        const projectDurationMs = Math.max(criticalPathLengthMs, projectEndTime);
-                        const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
-                        scheduleData[todo.id].slack = projectDurationMs - taskDurationMs;
-
-                        // Update latest times for non-critical independent tasks
-                        scheduleData[todo.id].latestFinish = new Date(projectDurationMs);
-                        scheduleData[todo.id].latestStart = new Date(projectDurationMs - taskDurationMs);
-                    }
-                });
-            }
-        } else {
-            // All tasks are independent - only longest tasks are critical
+        if (!hasAnyDependencies && todos.length > 0) {
+            // All tasks are independent - only the longest duration tasks are critical
             const maxDuration = Math.max(...todos.map(t => t.estimatedDays));
 
             todos.forEach(todo => {
-                scheduleData[todo.id].isOnCriticalPath = todo.estimatedDays === maxDuration;
+                const isCritical = todo.estimatedDays === maxDuration;
+                scheduleData[todo.id].isOnCriticalPath = isCritical;
 
-                if (todo.estimatedDays < maxDuration) {
-                    const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+                if (!isCritical) {
+                    // Non-critical independent tasks have slack equal to the difference
+                    // between their duration and the maximum duration
                     const maxDurationMs = maxDuration * 24 * 60 * 60 * 1000;
-                    scheduleData[todo.id].slack = maxDurationMs - taskDurationMs;
+                    const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
 
-                    // Update latest times
-                    scheduleData[todo.id].latestFinish = new Date(maxDurationMs);
-                    scheduleData[todo.id].latestStart = new Date(maxDurationMs - taskDurationMs);
+                    scheduleData[todo.id].slack = maxDurationMs - taskDurationMs;
+                    scheduleData[todo.id].latestFinish = new Date(
+                        scheduleData[todo.id].earliestFinish.getTime() + scheduleData[todo.id].slack
+                    );
+                    scheduleData[todo.id].latestStart = new Date(
+                        scheduleData[todo.id].earliestStart.getTime() + scheduleData[todo.id].slack
+                    );
                 }
             });
         }
     }
 
     /**
-     * Identify the critical path (longest path through the network)
+     * Identify the critical path (all tasks with zero slack, ordered by start time)
+     * Returns array of task IDs representing the critical path sequence
      */
     private static identifyCriticalPath(
         scheduleData: { [todoId: number]: any }
@@ -428,7 +414,7 @@ export class DependencyGraphService {
             .filter(([_, data]) => data.isOnCriticalPath)
             .map(([todoId, _]) => parseInt(todoId))
             .sort((a, b) => {
-                // Sort by earliest start time
+                // Sort by earliest start time to show proper sequence
                 return scheduleData[a].earliestStart.getTime() - scheduleData[b].earliestStart.getTime();
             });
     }
