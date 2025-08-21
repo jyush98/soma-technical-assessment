@@ -89,10 +89,13 @@ export default function TodoItem({
 
     const formatDate = (date: string | null) => {
         if (!date) return null;
-        return new Date(date).toLocaleDateString('en-US', {
+        const dateObj = new Date(date);
+        // Use UTC methods to avoid timezone conversion
+        return dateObj.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
-            year: 'numeric'
+            year: 'numeric',
+            timeZone: 'UTC' // Force UTC interpretation
         });
     };
 
