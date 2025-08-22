@@ -9,6 +9,7 @@ import ReactFlow, {
     Background,
     useNodesState,
     useEdgesState,
+    Connection,
     ConnectionMode,
     MarkerType,
     BackgroundVariant
@@ -20,6 +21,8 @@ interface DependencyGraphProps {
     todos: TodoWithRelations[];
     criticalPath: number[];
     onUpdate: () => void;
+    onAddDependency?: (todoId: number, dependsOnId: number) => Promise<void>;
+    onRemoveDependency?: (todoId: number, dependsOnId: number) => Promise<void>;
 }
 
 // Hierarchical layout algorithm
@@ -107,6 +110,8 @@ function getHierarchicalLayout(todos: TodoWithRelations[], criticalPath: number[
                     width: 180,
                     fontSize: '14px',
                 },
+                sourcePosition: 'right' as any,
+                targetPosition: 'left' as any,
             });
         });
     });
@@ -127,7 +132,7 @@ function getHierarchicalLayout(todos: TodoWithRelations[], criticalPath: number[
                     animated: isOnCriticalPath,
                     style: {
                         stroke: isOnCriticalPath ? '#dc2626' : '#9ca3af',
-                        strokeWidth: isOnCriticalPath ? 2 : 1,
+                        strokeWidth: isOnCriticalPath ? 4 : 3,
                     },
                     markerEnd: {
                         type: MarkerType.ArrowClosed,
@@ -141,9 +146,16 @@ function getHierarchicalLayout(todos: TodoWithRelations[], criticalPath: number[
     return { nodes, edges };
 }
 
-export default function DependencyGraph({ todos, criticalPath, onUpdate }: DependencyGraphProps) {
+export default function DependencyGraph({
+    todos,
+    criticalPath,
+    onUpdate,
+    onAddDependency,
+    onRemoveDependency
+}: DependencyGraphProps) {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [isUpdating, setIsUpdating] = useState(false);
 
     useEffect(() => {
         const { nodes: layoutNodes, edges: layoutEdges } = getHierarchicalLayout(todos, criticalPath);
@@ -151,25 +163,86 @@ export default function DependencyGraph({ todos, criticalPath, onUpdate }: Depen
         setEdges(layoutEdges);
     }, [todos, criticalPath, setNodes, setEdges]);
 
+    // Handle new connections (adding dependencies)
+    const onConnect = useCallback(async (params: Connection) => {
+        if (!onAddDependency || !params.source || !params.target) return;
+
+        const sourceId = parseInt(params.source);
+        const targetId = parseInt(params.target);
+
+        // Prevent self-connections
+        if (sourceId === targetId) {
+            alert('A task cannot depend on itself');
+            return;
+        }
+
+        setIsUpdating(true);
+        try {
+            // Target depends on Source in our model
+            await onAddDependency(targetId, sourceId);
+            onUpdate(); // Refresh the data
+        } catch (error: any) {
+            alert(error.message || 'Failed to add dependency');
+        } finally {
+            setIsUpdating(false);
+        }
+    }, [onAddDependency, onUpdate]);
+
+    // Handle edge deletion (removing dependencies)
+    const onEdgesDelete = useCallback(async (deletedEdges: Edge[]) => {
+        if (!onRemoveDependency || deletedEdges.length === 0) return;
+
+        setIsUpdating(true);
+        try {
+            for (const edge of deletedEdges) {
+                const sourceId = parseInt(edge.source);
+                const targetId = parseInt(edge.target);
+                await onRemoveDependency(targetId, sourceId);
+            }
+            onUpdate(); // Refresh the data
+        } catch (error: any) {
+            alert(error.message || 'Failed to remove dependency');
+        } finally {
+            setIsUpdating(false);
+        }
+    }, [onRemoveDependency, onUpdate]);
+
     return (
-        <div style={{ width: '100%', height: '500px' }}>
-            <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                connectionMode={ConnectionMode.Loose}
-                fitView
-                fitViewOptions={{ padding: 0.2 }}
-                nodesDraggable={true}
-                nodesConnectable={false}
-                elementsSelectable={true}
-                minZoom={0.5}
-                maxZoom={1.5}
-            >
-                <Controls />
-                <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-            </ReactFlow>
+        <div className="flex flex-col gap-4">
+            <div style={{ width: '100%', height: '500px' }}>
+                <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    onEdgesDelete={onEdgesDelete}
+                    connectionMode={ConnectionMode.Loose}
+                    fitView
+                    fitViewOptions={{ padding: 0.2 }}
+                    nodesDraggable={true}
+                    nodesConnectable={!!onAddDependency}
+                    deleteKeyCode={['Delete', 'Backspace']}
+                    elementsSelectable={true}
+                    minZoom={0.5}
+                    maxZoom={1.5}
+                >
+                    <Controls />
+                    <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+                    {isUpdating && (
+                        <div className="absolute top-4 right-4 bg-blue-500 text-white px-3 py-1 rounded">
+                            Updating...
+                        </div>
+                    )}
+                </ReactFlow>
+            </div>
+            {onAddDependency && (
+                <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-600">
+                    • Drag from one node to another to create a dependency<br />
+                    • Click on an edge and press Delete to remove a dependency<br />
+                    • Red edges indicate the critical path
+                </div>
+            )}
         </div>
     );
 }

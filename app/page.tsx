@@ -121,6 +121,31 @@ export default function Home() {
     );
   };
 
+  const handleAddDependency = async (todoId: number, dependsOnId: number) => {
+    const response = await fetch(`/api/todos/${todoId}/dependencies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dependsOnId })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to add dependency');
+    }
+  };
+
+  const handleRemoveDependency = async (todoId: number, dependsOnId: number) => {
+    const response = await fetch(`/api/todos/${todoId}/dependencies?dependsOnId=${dependsOnId}`, {
+      method: 'DELETE'
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to remove dependency');
+    }
+  };
+
+
   const handleRecalculateCriticalPath = async () => {
     setIsRecalculating(true);
     try {
@@ -265,7 +290,9 @@ export default function Home() {
                   <DependencyGraph
                     todos={todos}
                     criticalPath={criticalPath}
-                    onUpdate={handleUpdate}
+                    onUpdate={fetchTodos}
+                    onAddDependency={handleAddDependency}
+                    onRemoveDependency={handleRemoveDependency}
                   />
                 </div>
               </div>
