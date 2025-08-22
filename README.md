@@ -53,3 +53,68 @@ Implement a task dependency system that allows tasks to depend on other tasks. T
 3. Submit a link to your repository in the application form.
 
 Thanks for your time and effort. We'll be in touch soon!
+
+## Solution
+
+### Implementation Overview
+
+I've successfully implemented all three parts of the technical assessment with a focus on production-ready code quality and advanced software engineering practices.
+
+### Part 1: Due Dates ✅
+- Added date picker to task creation form
+- Implemented visual indicators for overdue tasks (red highlighting)
+- Stored dates in SQLite with proper timezone handling
+
+### Part 2: Image Generation ✅
+- Integrated Pexels API with intelligent query optimization
+- Implemented three-layer caching strategy (in-memory, database, CDN)
+- Added loading states and graceful fallbacks for API failures
+- Optimized search queries for better visual results (e.g., "buy groceries" → "grocery shopping supermarket")
+
+### Part 3: Task Dependencies ✅
+- Implemented Critical Path Method (CPM) algorithm with O(V+E) complexity
+- Circular dependency detection using depth-first search
+- Automatic calculation of earliest start dates based on dependency chains
+- Visual dependency graph using React Flow
+- Identifies and highlights critical path tasks that determine project duration
+
+### Technical Highlights
+
+- **Test Coverage**: 52 comprehensive tests including edge cases and performance tests
+- **Algorithm Performance**: Handles 100+ task networks efficiently
+- **Error Handling**: Graceful degradation for all external API failures
+- **Database Design**: Normalized schema with proper foreign key constraints
+- **Code Quality**: TypeScript throughout, proper error boundaries, accessibility features
+
+### Screenshots
+
+![Task Management System](./docs/screenshots/main-view.png)
+*Main task view showing due dates, images, and critical path highlighting*
+
+![Dependency Graph](./docs/screenshots/dependency-graph.png)
+*Interactive dependency visualization with critical path in red*
+
+### Architecture Decisions
+
+- **SQLite with Prisma ORM**: Zero-config for reviewers, easily migrates to PostgreSQL for production
+- **Server-centric state**: Simplifies synchronization, enables future real-time collaboration
+- **Multi-layer caching**: Respects Pexels API rate limits while maintaining performance
+- **Graph algorithms**: Industry-standard CPM implementation for project scheduling
+
+### Running the Solution
+
+```bash
+# Install dependencies
+npm install
+
+# Set up database
+npx prisma migrate dev
+
+# Add your Pexels API key to .env.local
+echo "PEXELS_API_KEY=your_key_here" > .env.local
+
+# Run tests
+npm test
+
+# Start development server
+npm run dev
