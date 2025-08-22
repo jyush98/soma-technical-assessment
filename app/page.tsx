@@ -5,6 +5,8 @@ import { useTodos } from '@/hooks/useTodos';
 import { useCriticalPath } from '@/hooks/useCriticalPath';
 import { useDependencies } from '@/hooks/useDependencies';
 import { useReadyTasks } from '@/hooks/useReadyTasks';
+import { useOptimisticTodos } from '@/hooks/useOptimisticTodos';
+import { criticalPathQueue } from '@/lib/utils/critical-path-queue';
 import ToDoItem from '@/components/ToDoItem';
 import AddToDoForm from '@/components/AddToDoForm';
 import EmptyState from '@/components/EmptyState';
@@ -27,12 +29,20 @@ export default function Home() {
   } = useTodos();
 
   const {
+    optimisticTodos,
+    syncTodos,
+    optimisticToggleComplete,
+    optimisticDelete,
+    hasPendingActions
+  } = useOptimisticTodos(todos);
+
+  const {
     criticalPath,
     criticalPathTasks,
     totalEstimatedDays,
     isRecalculating,
     recalculateCriticalPath
-  } = useCriticalPath(todos);
+  } = useCriticalPath(optimisticTodos);
 
   const {
     isUpdating: isDependencyUpdating,
@@ -44,7 +54,7 @@ export default function Home() {
     readyToStartTasks,
     totalReadyTasks,
     hasMoreReadyTasks
-  } = useReadyTasks(todos);
+  } = useReadyTasks(optimisticTodos);
 
   const [showGraph, setShowGraph] = useState(false);
   const [selectedTodoForEdit, setSelectedTodoForEdit] = useState<TodoWithRelations | null>(null);
@@ -53,6 +63,11 @@ export default function Home() {
   useEffect(() => {
     fetchTodos();
   }, [fetchTodos]);
+
+  // Sync optimistic todos when real todos change
+  useEffect(() => {
+    syncTodos(todos);
+  }, [todos, syncTodos]);
 
   // Handle add todo with recalculation
   const handleAddTodo = async (
@@ -63,34 +78,50 @@ export default function Home() {
   ) => {
     const result = await addTodo(title, dueDate, estimatedDays, dependencies);
     if (result.success) {
-      await recalculateCriticalPath();
-      await fetchTodos();
+      criticalPathQueue.enqueue(async () => {
+        await recalculateCriticalPath();
+        await fetchTodos();
+      });
     }
   };
 
-  // Handle delete with recalculation
+  // Handle delete with optimistic update
   const handleDeleteTodo = async (id: number) => {
-    await deleteTodo(id);
-    await recalculateCriticalPath();
-    await fetchTodos();
+    await optimisticDelete(id, async () => {
+      await deleteTodo(id);
+      criticalPathQueue.enqueue(async () => {
+        await recalculateCriticalPath();
+        await fetchTodos();
+      });
+    });
   };
 
-  // Handle toggle complete with recalculation
+  // Handle toggle complete with optimistic update
   const handleToggleComplete = async (id: number) => {
-    await toggleComplete(id);
-    await recalculateCriticalPath();
-    await fetchTodos();
+    await optimisticToggleComplete(id, async () => {
+      await toggleComplete(id);
+      criticalPathQueue.enqueue(async () => {
+        await recalculateCriticalPath();
+        await fetchTodos();
+      });
+    });
   };
 
   // Handle dependency changes
   const handleAddDependency = async (todoId: number, dependsOnId: number) => {
     await addDependency(todoId, dependsOnId);
-    await fetchTodos();
+    criticalPathQueue.enqueue(async () => {
+      await recalculateCriticalPath();
+      await fetchTodos();
+    });
   };
 
   const handleRemoveDependency = async (todoId: number, dependsOnId: number) => {
     await removeDependency(todoId, dependsOnId);
-    await fetchTodos();
+    criticalPathQueue.enqueue(async () => {
+      await recalculateCriticalPath();
+      await fetchTodos();
+    });
   };
 
   // Handle critical path recalculation
@@ -101,8 +132,10 @@ export default function Home() {
 
   // Handle updates from modals
   const handleUpdate = async () => {
-    await recalculateCriticalPath();
-    await fetchTodos();
+    criticalPathQueue.enqueue(async () => {
+      await recalculateCriticalPath();
+      await fetchTodos();
+    });
   };
 
   return (
@@ -137,9 +170,9 @@ export default function Home() {
                         </svg>
                         <h3 className="text-xl font-semibold">
                           Critical Path Analysis
-                          {isRecalculating && (
+                          {(isRecalculating || hasPendingActions) && (
                             <span className="ml-3 text-sm font-normal opacity-90">
-                              (Recalculating...)
+                              (Updating...)
                             </span>
                           )}
                         </h3>
@@ -182,7 +215,7 @@ export default function Home() {
                     <h3 className="text-xl font-semibold text-gray-800">Dependency Graph</h3>
                   </div>
                   <DependencyGraph
-                    todos={todos}
+                    todos={optimisticTodos}
                     criticalPath={criticalPath}
                     onUpdate={fetchTodos}
                     onAddDependency={handleAddDependency}
@@ -206,14 +239,14 @@ export default function Home() {
                 <AddToDoForm
                   onAddTodo={handleAddTodo}
                   isLoading={isAddingTodo}
-                  existingTodos={todos}
+                  existingTodos={optimisticTodos}
                 />
               </div>
             </div>
 
             {/* Todo List */}
             <div className="mb-8">
-              {todos.length === 0 ? (
+              {optimisticTodos.length === 0 ? (
                 <div className="flex justify-center">
                   <EmptyState />
                 </div>
@@ -222,17 +255,17 @@ export default function Home() {
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-semibold text-gray-800">Your Tasks</h2>
                     <div className="text-sm text-gray-500">
-                      {todos.length} total • {todos.filter(t => t.completed).length} completed
-                      {(isRecalculating || isDependencyUpdating) && ' • Updating...'}
+                      {optimisticTodos.length} total • {optimisticTodos.filter(t => t.completed).length} completed
+                      {(isRecalculating || isDependencyUpdating || hasPendingActions) && ' • Updating...'}
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                    {todos.map((todo) => (
+                    {optimisticTodos.map((todo) => (
                       <ToDoItem
                         key={todo.id}
                         todo={todo}
-                        allTodos={todos}
+                        allTodos={optimisticTodos}
                         onDelete={handleDeleteTodo}
                         onImageUpdate={updateImageData}
                         onUpdate={handleUpdate}
@@ -293,8 +326,8 @@ export default function Home() {
                   Statistics
                 </h3>
                 <CompactStats
-                  totalTasks={todos.length}
-                  completedTasks={todos.filter(t => t.completed).length}
+                  totalTasks={optimisticTodos.length}
+                  completedTasks={optimisticTodos.filter(t => t.completed).length}
                   criticalTasks={criticalPathTasks.length}
                   projectDuration={totalEstimatedDays}
                 />
@@ -308,7 +341,7 @@ export default function Home() {
       {selectedTodoForEdit && (
         <EditToDoModal
           todo={selectedTodoForEdit}
-          allTodos={todos}
+          allTodos={optimisticTodos}
           isOpen={!!selectedTodoForEdit}
           onClose={() => setSelectedTodoForEdit(null)}
           onUpdate={handleUpdate}

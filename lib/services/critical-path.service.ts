@@ -13,12 +13,26 @@ export interface CriticalPathResult {
 }
 
 export class CriticalPathService {
+    private cache: {
+        result: CriticalPathResult | null;
+        timestamp: number;
+    } = { result: null, timestamp: 0 };
+
+    private readonly CACHE_TTL = 5000; // 5 seconds
+
     constructor(private prisma: PrismaClient) { }
 
     /**
      * Get current critical path calculation without updating database
      */
     async getCriticalPath(): Promise<CriticalPathResult> {
+        const now = Date.now();
+
+        // Return cached result if fresh
+        if (this.cache.result && (now - this.cache.timestamp) < this.CACHE_TTL) {
+            return this.cache.result;
+        }
+
         const todos = await this.prisma.todo.findMany({
             include: {
                 dependencies: { select: { dependsOnId: true } },
@@ -40,7 +54,7 @@ export class CriticalPathService {
 
         const result = DependencyGraphService.calculateCriticalPath(todosForCalculation);
 
-        return {
+        const criticalPathResult = {
             criticalPath: result.criticalPath || [],
             scheduleData: result.scheduleData || {},
             isValid: result.isValid,
@@ -51,6 +65,10 @@ export class CriticalPathService {
                 ? result.scheduleData[result.criticalPath[result.criticalPath.length - 1]]?.earliestFinish
                 : null
         };
+
+        // Cache the result
+        this.cache = { result: criticalPathResult, timestamp: now };
+        return criticalPathResult;
     }
 
     /**
@@ -62,6 +80,9 @@ export class CriticalPathService {
         updatedTasks: number;
         scheduleData: any;
     }> {
+        // Invalidate cache when recalculating
+        this.invalidateCache();
+
         const todos = await this.prisma.todo.findMany({
             include: {
                 dependencies: { select: { dependsOnId: true } },
@@ -116,5 +137,12 @@ export class CriticalPathService {
             updatedTasks: 0,
             scheduleData: {}
         };
+    }
+
+    /**
+     * Invalidate the cache
+     */
+    invalidateCache() {
+        this.cache = { result: null, timestamp: 0 };
     }
 }
