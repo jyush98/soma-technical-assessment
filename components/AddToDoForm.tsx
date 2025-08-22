@@ -13,7 +13,7 @@ interface AddToDoFormProps {
 export default function AddToDoForm({ onAddTodo, isLoading = false, existingTodos = [] }: AddToDoFormProps) {
     const [newTodo, setNewTodo] = useState('');
     const [newDueDate, setNewDueDate] = useState('');
-    const [estimatedDays, setEstimatedDays] = useState(1);
+    const [estimatedDays, setEstimatedDays] = useState<number | ''>(1);
     const [selectedDependencies, setSelectedDependencies] = useState<number[]>([]);
     const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -23,7 +23,9 @@ export default function AddToDoForm({ onAddTodo, isLoading = false, existingTodo
     const handleSubmit = () => {
         if (!newTodo.trim()) return;
 
-        onAddTodo(newTodo, newDueDate || null, estimatedDays, selectedDependencies);
+        // Ensure estimatedDays is at least 1 when submitting
+        const finalEstimatedDays = estimatedDays === '' || estimatedDays < 1 ? 1 : estimatedDays;
+        onAddTodo(newTodo, newDueDate || null, finalEstimatedDays, selectedDependencies);
 
         // Reset form
         setNewTodo('');
@@ -98,7 +100,16 @@ export default function AddToDoForm({ onAddTodo, isLoading = false, existingTodo
                         min="1"
                         max="365"
                         value={estimatedDays}
-                        onChange={(e) => setEstimatedDays(Math.max(1, parseInt(e.target.value) || 1))}
+                        onChange={(e) => {
+                            const value = e.target.value;
+                            // Allow empty string for backspacing, but enforce minimum 1 on blur
+                            setEstimatedDays(value === '' ? '' : parseInt(value) || 1);
+                        }}
+                        onBlur={(e) => {
+                            // Enforce minimum of 1 when user leaves the field
+                            const value = parseInt(e.target.value) || 1;
+                            setEstimatedDays(Math.max(1, Math.min(365, value)));
+                        }}
                         className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
                         disabled={isLoading}
                     />
@@ -217,7 +228,7 @@ export default function AddToDoForm({ onAddTodo, isLoading = false, existingTodo
             </div>
 
             {/* Form Validation Helper */}
-            {newTodo.trim() && estimatedDays > 0 && (
+            {newTodo.trim() && estimatedDays !== '' && estimatedDays > 0 && (
                 <div className="text-xs text-gray-500 text-center">
                     Ready to create: "{newTodo}" • {estimatedDays} day{estimatedDays !== 1 ? 's' : ''}
                     {selectedDependencies.length > 0 && ` • ${selectedDependencies.length} dependencies`}
