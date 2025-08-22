@@ -18,50 +18,16 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma
-            const mockFindMany = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                    },
-                },
-            }));
-
-            // Mock DependencyGraphService
-            const mockCalculateCriticalPath = jest.fn();
-            jest.doMock('../../../../lib/dependency-graph', () => ({
-                DependencyGraphService: {
-                    calculateCriticalPath: mockCalculateCriticalPath,
-                },
-            }));
-
-            // Arrange: Mock todos and critical path result
-            const mockTodos = [
-                {
-                    id: 1,
-                    title: 'Task 1',
-                    completed: false,
-                    estimatedDays: 2,
-                    dependencies: [],
-                    dependents: [{ todoId: 2 }],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
-                },
-                {
-                    id: 2,
-                    title: 'Task 2',
-                    completed: false,
-                    estimatedDays: 3,
-                    dependencies: [{ dependsOnId: 1 }],
-                    dependents: [],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
+            // Mock the critical path service
+            const mockGetCriticalPath = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    getCriticalPath: mockGetCriticalPath,
                 }
-            ];
+            }));
 
-            const mockCriticalPathResult = {
-                isValid: true,
+            // Arrange: Mock critical path result
+            const mockResult = {
                 criticalPath: [1, 2],
                 scheduleData: {
                     1: {
@@ -76,11 +42,15 @@ describe('Critical Path API Route', () => {
                         isOnCriticalPath: true,
                         slack: 0
                     }
-                }
+                },
+                isValid: true,
+                error: undefined,
+                totalTasks: 2,
+                criticalTaskCount: 2,
+                projectEndDate: new Date('2025-01-06T09:00:00Z')
             };
 
-            mockFindMany.mockResolvedValue(mockTodos);
-            mockCalculateCriticalPath.mockReturnValue(mockCriticalPathResult);
+            mockGetCriticalPath.mockResolvedValue(mockResult);
 
             // Import and test
             const { GET } = await import('../critical-path/route');
@@ -89,25 +59,8 @@ describe('Critical Path API Route', () => {
             const data = await response.json();
 
             expect(response.status).toBe(200);
-            expect(data).toEqual({
-                criticalPath: [1, 2],
-                scheduleData: mockCriticalPathResult.scheduleData,
-                isValid: true,
-                error: undefined,
-                totalTasks: 2,
-                criticalTaskCount: 2,
-                projectEndDate: new Date('2025-01-06T09:00:00Z')
-            });
-            expect(mockCalculateCriticalPath).toHaveBeenCalledWith(
-                expect.arrayContaining([
-                    expect.objectContaining({
-                        id: 1,
-                        title: 'Task 1',
-                        completed: false,
-                        estimatedDays: 2
-                    })
-                ])
-            );
+            expect(data).toEqual(mockResult);
+            expect(mockGetCriticalPath).toHaveBeenCalled();
         });
 
         it('should handle empty task list', async () => {
@@ -121,30 +74,25 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma
-            const mockFindMany = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                    },
-                },
+            // Mock the critical path service
+            const mockGetCriticalPath = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    getCriticalPath: mockGetCriticalPath,
+                }
             }));
 
-            // Mock DependencyGraphService
-            const mockCalculateCriticalPath = jest.fn();
-            jest.doMock('../../../../lib/dependency-graph', () => ({
-                DependencyGraphService: {
-                    calculateCriticalPath: mockCalculateCriticalPath,
-                },
-            }));
-
-            mockFindMany.mockResolvedValue([]);
-            mockCalculateCriticalPath.mockReturnValue({
-                isValid: true,
+            const mockResult = {
                 criticalPath: [],
-                scheduleData: {}
-            });
+                scheduleData: {},
+                isValid: true,
+                error: undefined,
+                totalTasks: 0,
+                criticalTaskCount: 0,
+                projectEndDate: null
+            };
+
+            mockGetCriticalPath.mockResolvedValue(mockResult);
 
             // Import and test
             const { GET } = await import('../critical-path/route');
@@ -153,15 +101,7 @@ describe('Critical Path API Route', () => {
             const data = await response.json();
 
             expect(response.status).toBe(200);
-            expect(data).toEqual({
-                criticalPath: [],
-                scheduleData: {},
-                isValid: true,
-                error: undefined,
-                totalTasks: 0,
-                criticalTaskCount: 0,
-                projectEndDate: null
-            });
+            expect(data).toEqual(mockResult);
         });
 
         it('should handle circular dependency error', async () => {
@@ -175,56 +115,25 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma
-            const mockFindMany = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                    },
-                },
-            }));
-
-            // Mock DependencyGraphService
-            const mockCalculateCriticalPath = jest.fn();
-            jest.doMock('../../../../lib/dependency-graph', () => ({
-                DependencyGraphService: {
-                    calculateCriticalPath: mockCalculateCriticalPath,
-                },
-            }));
-
-            // Arrange: Mock circular dependency scenario
-            const mockTodos = [
-                {
-                    id: 1,
-                    title: 'Task 1',
-                    completed: false,
-                    estimatedDays: 1,
-                    dependencies: [{ dependsOnId: 2 }],
-                    dependents: [],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
-                },
-                {
-                    id: 2,
-                    title: 'Task 2',
-                    completed: false,
-                    estimatedDays: 1,
-                    dependencies: [{ dependsOnId: 1 }],
-                    dependents: [],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
+            // Mock the critical path service
+            const mockGetCriticalPath = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    getCriticalPath: mockGetCriticalPath,
                 }
-            ];
+            }));
 
-            mockFindMany.mockResolvedValue(mockTodos);
-            mockCalculateCriticalPath.mockReturnValue({
+            const mockResult = {
+                criticalPath: [],
+                scheduleData: {},
                 isValid: false,
-                circularDependency: {
-                    cycle: [1, 2, 1],
-                    message: 'Circular dependency detected: 1 → 2 → 1'
-                }
-            });
+                error: 'Circular dependency detected: 1 → 2 → 1',
+                totalTasks: 2,
+                criticalTaskCount: 0,
+                projectEndDate: null
+            };
+
+            mockGetCriticalPath.mockResolvedValue(mockResult);
 
             // Import and test
             const { GET } = await import('../critical-path/route');
@@ -233,15 +142,7 @@ describe('Critical Path API Route', () => {
             const data = await response.json();
 
             expect(response.status).toBe(200);
-            expect(data).toEqual({
-                criticalPath: [],
-                scheduleData: {},
-                isValid: false,
-                error: 'Circular dependency detected: 1 → 2 → 1',
-                totalTasks: 2,
-                criticalTaskCount: 0,
-                projectEndDate: null
-            });
+            expect(data).toEqual(mockResult);
         });
 
         it('should handle database errors', async () => {
@@ -255,17 +156,15 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma to throw error
-            const mockFindMany = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                    },
-                },
+            // Mock the critical path service to throw error
+            const mockGetCriticalPath = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    getCriticalPath: mockGetCriticalPath,
+                }
             }));
 
-            mockFindMany.mockRejectedValue(new Error('Database connection failed'));
+            mockGetCriticalPath.mockRejectedValue(new Error('Database connection failed'));
 
             // Import and test
             const { GET } = await import('../critical-path/route');
@@ -290,53 +189,19 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma
-            const mockFindMany = jest.fn();
-            const mockUpdate = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                        update: mockUpdate,
-                    },
-                },
-            }));
-
-            // Mock DependencyGraphService
-            const mockCalculateCriticalPath = jest.fn();
-            jest.doMock('../../../../lib/dependency-graph', () => ({
-                DependencyGraphService: {
-                    calculateCriticalPath: mockCalculateCriticalPath,
-                },
+            // Mock the critical path service
+            const mockRecalculateAndUpdate = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    recalculateAndUpdate: mockRecalculateAndUpdate,
+                }
             }));
 
             // Arrange: Mock successful recalculation
-            const mockTodos = [
-                {
-                    id: 1,
-                    title: 'Task 1',
-                    completed: false,
-                    estimatedDays: 2,
-                    dependencies: [],
-                    dependents: [{ todoId: 2 }],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
-                },
-                {
-                    id: 2,
-                    title: 'Task 2',
-                    completed: false,
-                    estimatedDays: 3,
-                    dependencies: [{ dependsOnId: 1 }],
-                    dependents: [],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
-                }
-            ];
-
-            const mockCriticalPathResult = {
-                isValid: true,
+            const mockResult = {
+                message: 'Critical path recalculated successfully',
                 criticalPath: [1, 2],
+                updatedTasks: 2,
                 scheduleData: {
                     1: {
                         earliestStart: new Date('2025-01-01T09:00:00Z'),
@@ -349,9 +214,7 @@ describe('Critical Path API Route', () => {
                 }
             };
 
-            mockFindMany.mockResolvedValue(mockTodos);
-            mockCalculateCriticalPath.mockReturnValue(mockCriticalPathResult);
-            mockUpdate.mockResolvedValue({});
+            mockRecalculateAndUpdate.mockResolvedValue(mockResult);
 
             // Import and test
             const { POST } = await import('../critical-path/route');
@@ -360,22 +223,8 @@ describe('Critical Path API Route', () => {
             const data = await response.json();
 
             expect(response.status).toBe(200);
-            expect(data).toEqual({
-                message: 'Critical path recalculated successfully',
-                criticalPath: [1, 2],
-                updatedTasks: 2,
-                scheduleData: mockCriticalPathResult.scheduleData
-            });
-
-            // Verify all todos were updated
-            expect(mockUpdate).toHaveBeenCalledTimes(2);
-            expect(mockUpdate).toHaveBeenCalledWith({
-                where: { id: 1 },
-                data: {
-                    earliestStartDate: mockCriticalPathResult.scheduleData[1].earliestStart,
-                    isOnCriticalPath: true
-                }
-            });
+            expect(data).toEqual(mockResult);
+            expect(mockRecalculateAndUpdate).toHaveBeenCalled();
         });
 
         it('should handle circular dependency during recalculation', async () => {
@@ -389,55 +238,18 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma
-            const mockFindMany = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                    },
-                },
+            // Mock the critical path service
+            const mockRecalculateAndUpdate = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    recalculateAndUpdate: mockRecalculateAndUpdate,
+                }
             }));
 
-            // Mock DependencyGraphService
-            const mockCalculateCriticalPath = jest.fn();
-            jest.doMock('../../../../lib/dependency-graph', () => ({
-                DependencyGraphService: {
-                    calculateCriticalPath: mockCalculateCriticalPath,
-                },
-            }));
-
-            // Arrange: Mock circular dependency
-            const mockTodos = [
-                {
-                    id: 1,
-                    title: 'Task 1',
-                    completed: false,
-                    estimatedDays: 1,
-                    dependencies: [{ dependsOnId: 2 }],
-                    dependents: [],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
-                },
-                {
-                    id: 2,
-                    title: 'Task 2',
-                    completed: false,
-                    estimatedDays: 1,
-                    dependencies: [{ dependsOnId: 1 }],
-                    dependents: [],
-                    earliestStartDate: null,
-                    isOnCriticalPath: false
-                }
-            ];
-
-            mockFindMany.mockResolvedValue(mockTodos);
-            mockCalculateCriticalPath.mockReturnValue({
-                isValid: false,
-                circularDependency: {
-                    message: 'Circular dependency detected: 1 → 2 → 1'
-                }
-            });
+            // Arrange: Mock circular dependency error
+            mockRecalculateAndUpdate.mockRejectedValue(
+                new Error('Circular dependency detected: 1 → 2 → 1')
+            );
 
             // Import and test
             const { POST } = await import('../critical-path/route');
@@ -463,44 +275,16 @@ describe('Critical Path API Route', () => {
                 NextResponse: { json: mockJson }
             }));
 
-            // Mock Prisma to throw error during update
-            const mockFindMany = jest.fn();
-            const mockUpdate = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: {
-                        findMany: mockFindMany,
-                        update: mockUpdate,
-                    },
-                },
-            }));
-
-            // Mock DependencyGraphService
-            const mockCalculateCriticalPath = jest.fn();
-            jest.doMock('../../../../lib/dependency-graph', () => ({
-                DependencyGraphService: {
-                    calculateCriticalPath: mockCalculateCriticalPath,
-                },
-            }));
-
-            mockFindMany.mockResolvedValue([{
-                id: 1,
-                title: 'Task 1',
-                completed: false,
-                estimatedDays: 1,
-                dependencies: [],
-                dependents: [],
-                earliestStartDate: null,
-                isOnCriticalPath: false
-            }]);
-            mockCalculateCriticalPath.mockReturnValue({
-                isValid: true,
-                criticalPath: [1],
-                scheduleData: {
-                    1: { earliestStart: new Date(), isOnCriticalPath: true }
+            // Mock the critical path service
+            const mockRecalculateAndUpdate = jest.fn();
+            jest.doMock('../../../../lib/services', () => ({
+                criticalPathService: {
+                    recalculateAndUpdate: mockRecalculateAndUpdate,
                 }
-            });
-            mockUpdate.mockRejectedValue(new Error('Database update failed'));
+            }));
+
+            // Mock the service to throw an error
+            mockRecalculateAndUpdate.mockRejectedValue(new Error('Database update failed'));
 
             // Import and test
             const { POST } = await import('../critical-path/route');

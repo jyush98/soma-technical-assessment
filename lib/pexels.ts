@@ -1,4 +1,6 @@
 // lib/pexels.ts
+import { prisma } from '@/lib/prisma';
+
 interface PexelsPhoto {
     id: number;
     width: number;
@@ -91,14 +93,11 @@ class PexelsService {
     }
 
     /**
- * Generate and save image for a todo item
- * Handles the complete flow: search, save to DB, and error handling
- */
+     * Generate and save image for a todo item
+     * Handles the complete flow: search, save to DB, and error handling
+     */
     async generateAndSaveImage(todoId: number, title: string): Promise<void> {
         try {
-            // Import prisma here to avoid circular dependencies
-            const { prisma } = await import('@/lib/prisma');
-
             // Search for image
             const photo = await this.searchImage(title);
 
@@ -127,7 +126,6 @@ class PexelsService {
             console.error('Error generating image for todo:', error);
             // Always clear loading state on error
             try {
-                const { prisma } = await import('@/lib/prisma');
                 await prisma.todo.update({
                     where: { id: todoId },
                     data: { imageLoading: false },
