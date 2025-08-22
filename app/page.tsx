@@ -1,6 +1,10 @@
 // app/page.tsx
 "use client"
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
+import { useTodos } from '@/hooks/useTodos';
+import { useCriticalPath } from '@/hooks/useCriticalPath';
+import { useDependencies } from '@/hooks/useDependencies';
+import { useReadyTasks } from '@/hooks/useReadyTasks';
 import ToDoItem from '@/components/ToDoItem';
 import AddToDoForm from '@/components/AddToDoForm';
 import EmptyState from '@/components/EmptyState';
@@ -11,205 +15,95 @@ import EditToDoModal from '@/components/EditToDoModal';
 import { TodoWithRelations } from '@/lib/types';
 
 export default function Home() {
-  const [todos, setTodos] = useState<TodoWithRelations[]>([]);
-  const [isAddingTodo, setIsAddingTodo] = useState(false);
+  const {
+    todos,
+    isLoading,
+    isAddingTodo,
+    fetchTodos,
+    addTodo,
+    deleteTodo,
+    toggleComplete,
+    updateImageData
+  } = useTodos();
+
+  const {
+    criticalPath,
+    criticalPathTasks,
+    totalEstimatedDays,
+    isRecalculating,
+    recalculateCriticalPath
+  } = useCriticalPath(todos);
+
+  const {
+    isUpdating: isDependencyUpdating,
+    addDependency,
+    removeDependency
+  } = useDependencies();
+
+  const {
+    readyToStartTasks,
+    totalReadyTasks,
+    hasMoreReadyTasks
+  } = useReadyTasks(todos);
+
   const [showGraph, setShowGraph] = useState(false);
-  const [isRecalculating, setIsRecalculating] = useState(false);
   const [selectedTodoForEdit, setSelectedTodoForEdit] = useState<TodoWithRelations | null>(null);
 
-  // Single fetch function that gets todos with all critical path info
-  const fetchTodos = useCallback(async () => {
-    try {
-      const res = await fetch('/api/todos');
-      const data = await res.json();
-      setTodos(data);
-    } catch (error) {
-      console.error('Failed to fetch todos:', error);
-    }
-  }, []);
-
+  // Initial load
   useEffect(() => {
     fetchTodos();
   }, [fetchTodos]);
 
+  // Handle add todo with recalculation
   const handleAddTodo = async (
     title: string,
     dueDate: string | null,
     estimatedDays: number,
     dependencies: number[]
   ) => {
-    setIsAddingTodo(true);
-    setIsRecalculating(true);
-    try {
-      const response = await fetch('/api/todos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          dueDate,
-          estimatedDays,
-          dependencies
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.todos) {
-          setTodos(data.todos);
-        } else {
-          await fetchTodos();
-        }
-      } else {
-        throw new Error('Failed to add todo');
-      }
-    } catch (error) {
-      console.error('Failed to add todo:', error);
+    const result = await addTodo(title, dueDate, estimatedDays, dependencies);
+    if (result.success) {
+      await recalculateCriticalPath();
       await fetchTodos();
-    } finally {
-      setIsAddingTodo(false);
-      setIsRecalculating(false);
     }
   };
 
+  // Handle delete with recalculation
   const handleDeleteTodo = async (id: number) => {
-    setIsRecalculating(true);
-    try {
-      await fetch(`/api/todos/${id}`, {
-        method: 'DELETE',
-      });
-      await fetchTodos();
-    } catch (error) {
-      console.error('Failed to delete todo:', error);
-    } finally {
-      setIsRecalculating(false);
-    }
-  };
-
-  const handleToggleComplete = async (id: number) => {
-    setIsRecalculating(true);
-    try {
-      const todo = todos.find(t => t.id === id);
-      if (!todo) return;
-
-      await fetch(`/api/todos/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: !todo.completed })
-      });
-      // The backend recalculates critical path on completion change
-      await fetchTodos();
-    } catch (error) {
-      console.error('Failed to toggle todo:', error);
-    } finally {
-      setIsRecalculating(false);
-    }
-  };
-
-  const handleUpdate = useCallback(async () => {
-    setIsRecalculating(true);
+    await deleteTodo(id);
+    await recalculateCriticalPath();
     await fetchTodos();
-    setIsRecalculating(false);
-  }, [fetchTodos]);
-
-  const handleImageUpdate = (todoId: number, imageData: { imageUrl: string; imageAlt: string }) => {
-    setTodos(prevTodos =>
-      prevTodos.map(todo =>
-        todo.id === todoId
-          ? { ...todo, imageUrl: imageData.imageUrl, imageAlt: imageData.imageAlt, imageLoading: false }
-          : todo
-      )
-    );
   };
 
-  const handleAddDependency = async (todoId: number, dependsOnId: number) => {
-    const response = await fetch(`/api/todos/${todoId}/dependencies`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dependsOnId })
-    });
+  // Handle toggle complete with recalculation
+  const handleToggleComplete = async (id: number) => {
+    await toggleComplete(id);
+    await recalculateCriticalPath();
+    await fetchTodos();
+  };
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to add dependency');
-    }
+  // Handle dependency changes
+  const handleAddDependency = async (todoId: number, dependsOnId: number) => {
+    await addDependency(todoId, dependsOnId);
+    await fetchTodos();
   };
 
   const handleRemoveDependency = async (todoId: number, dependsOnId: number) => {
-    const response = await fetch(`/api/todos/${todoId}/dependencies?dependsOnId=${dependsOnId}`, {
-      method: 'DELETE'
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to remove dependency');
-    }
+    await removeDependency(todoId, dependsOnId);
+    await fetchTodos();
   };
 
-
+  // Handle critical path recalculation
   const handleRecalculateCriticalPath = async () => {
-    setIsRecalculating(true);
-    try {
-      await fetch('/api/todos/critical-path', { method: 'POST' });
-      await fetchTodos();
-    } catch (error) {
-      console.error('Failed to recalculate critical path:', error);
-    } finally {
-      setIsRecalculating(false);
-    }
+    await recalculateCriticalPath();
+    await fetchTodos();
   };
 
-  // Calculate ready to start tasks (tasks with no incomplete dependencies)
-  const getReadyToStartTasks = () => {
-    return todos.filter(todo => {
-      if (todo.completed) return false;
-
-      // Check if all dependencies are completed
-      if (!todo.dependencies || todo.dependencies.length === 0) {
-        return true; // No dependencies means ready to start
-      }
-
-      // Check if all dependencies are completed
-      return todo.dependencies.every(dep => {
-        const dependencyTodo = todos.find(t => t.id === dep.dependsOnId);
-        return dependencyTodo?.completed === true;
-      });
-    })
-      .sort((a, b) => {
-        // Sort by critical path first, then by duration
-        if (a.isOnCriticalPath && !b.isOnCriticalPath) return -1;
-        if (!a.isOnCriticalPath && b.isOnCriticalPath) return 1;
-        return (b.estimatedDays || 1) - (a.estimatedDays || 1);
-      })
-      .slice(0, 5); // Maximum 5 tasks
+  // Handle updates from modals
+  const handleUpdate = async () => {
+    await recalculateCriticalPath();
+    await fetchTodos();
   };
-
-  // Derive critical path info from todos  
-  const criticalPath = todos.filter(todo => todo.isOnCriticalPath).map(t => t.id);
-  const criticalPathTasks = todos.filter(todo => todo.isOnCriticalPath);
-  const readyToStartTasks = getReadyToStartTasks();
-
-  // Calculate project duration
-  let totalEstimatedDays = 0;
-  if (todos.length > 0) {
-    const taskFinishTimes = todos.map(task => {
-      if (task.earliestStartDate) {
-        const startMs = new Date(task.earliestStartDate).getTime();
-        const durationMs = (task.estimatedDays || 1) * 24 * 60 * 60 * 1000;
-        return startMs + durationMs;
-      } else {
-        return (task.estimatedDays || 1) * 24 * 60 * 60 * 1000;
-      }
-    });
-
-    if (taskFinishTimes.length > 0) {
-      const maxFinishTime = Math.max(...taskFinishTimes);
-      const projectStartTime = Math.min(...todos
-        .filter(t => !t.dependencies || t.dependencies.length === 0)
-        .map(t => t.earliestStartDate ? new Date(t.earliestStartDate).getTime() : 0));
-
-      totalEstimatedDays = Math.ceil((maxFinishTime - projectStartTime) / (24 * 60 * 60 * 1000));
-    }
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/40">
@@ -329,7 +223,7 @@ export default function Home() {
                     <h2 className="text-2xl font-semibold text-gray-800">Your Tasks</h2>
                     <div className="text-sm text-gray-500">
                       {todos.length} total • {todos.filter(t => t.completed).length} completed
-                      {isRecalculating && ' • Updating critical path...'}
+                      {(isRecalculating || isDependencyUpdating) && ' • Updating...'}
                     </div>
                   </div>
 
@@ -340,7 +234,7 @@ export default function Home() {
                         todo={todo}
                         allTodos={todos}
                         onDelete={handleDeleteTodo}
-                        onImageUpdate={handleImageUpdate}
+                        onImageUpdate={updateImageData}
                         onUpdate={handleUpdate}
                         onToggleComplete={handleToggleComplete}
                       />
@@ -378,25 +272,11 @@ export default function Home() {
                       />
                     ))}
 
-                    {todos.filter(t => !t.completed && (
-                      !t.dependencies ||
-                      t.dependencies.length === 0 ||
-                      t.dependencies.every(dep => {
-                        const depTodo = todos.find(td => td.id === dep.dependsOnId);
-                        return depTodo?.completed === true;
-                      })
-                    )).length > 5 && (
-                        <p className="text-sm text-gray-500 text-center mt-3">
-                          +{todos.filter(t => !t.completed && (
-                            !t.dependencies ||
-                            t.dependencies.length === 0 ||
-                            t.dependencies.every(dep => {
-                              const depTodo = todos.find(td => td.id === dep.dependsOnId);
-                              return depTodo?.completed === true;
-                            })
-                          )).length - 5} more ready tasks
-                        </p>
-                      )}
+                    {hasMoreReadyTasks && (
+                      <p className="text-sm text-gray-500 text-center mt-3">
+                        +{totalReadyTasks - 5} more ready tasks
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
