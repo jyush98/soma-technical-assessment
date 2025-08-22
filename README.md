@@ -94,6 +94,8 @@ I've successfully implemented all three parts of the technical assessment with a
 ![Dependency Graph](./docs/screenshots/dependency-graph.png)
 *Interactive dependency visualization with critical path in red*
 
+![Loom Video](https://www.loom.com/share/de678d1c9b914be38f5d315311c85814)
+
 ### Architecture Decisions
 
 - **SQLite with Prisma ORM**: Zero-config for reviewers, easily migrates to PostgreSQL for production
