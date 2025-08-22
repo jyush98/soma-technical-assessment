@@ -306,7 +306,7 @@ export class DependencyGraphService {
 
             // Set earliest times
             scheduleData[todoId].earliestStart = new Date(maxPredecessorFinish);
-            const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+            const durationMs = todo.completed ? 0 : todo.estimatedDays * 24 * 60 * 60 * 1000;
             scheduleData[todoId].earliestFinish = new Date(
                 maxPredecessorFinish.getTime() + durationMs
             );
@@ -371,7 +371,7 @@ export class DependencyGraphService {
             }
 
             // Calculate latest start based on latest finish and duration
-            const durationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+            const durationMs = todo.completed ? 0 : todo.estimatedDays * 24 * 60 * 60 * 1000;
             scheduleData[todoId].latestStart = new Date(
                 scheduleData[todoId].latestFinish.getTime() - durationMs
             );
@@ -405,7 +405,7 @@ export class DependencyGraphService {
 
             // For independent tasks, mark as critical if their duration >= the critical path duration
             independentTasks.forEach(todo => {
-                const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+                const taskDurationMs = todo.completed ? 0 : todo.estimatedDays * 24 * 60 * 60 * 1000;
                 const taskEndTime = scheduleData[todo.id].earliestFinish.getTime();
 
                 // Task is critical if it ends at or after the project end time
@@ -437,7 +437,7 @@ export class DependencyGraphService {
 
                 if (!isCritical) {
                     const maxDurationMs = maxDuration * 24 * 60 * 60 * 1000;
-                    const taskDurationMs = todo.estimatedDays * 24 * 60 * 60 * 1000;
+                    const taskDurationMs = todo.completed ? 0 : todo.estimatedDays * 24 * 60 * 60 * 1000;
 
                     scheduleData[todo.id].slack = maxDurationMs - taskDurationMs;
                     scheduleData[todo.id].latestFinish = new Date(

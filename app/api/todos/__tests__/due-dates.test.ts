@@ -1,49 +1,78 @@
-describe('Due Dates API Tests', () => {
+// app/api/todos/__tests__/due-dates.test.ts
 
+jest.mock('next/server', () => ({
+    NextResponse: {
+        json: jest.fn((data, init) => ({
+            status: init?.status || 200,
+            json: async () => data
+        }))
+    }
+}));
+
+import { todoService } from '@/lib/services';
+
+jest.mock('../../../../lib/services', () => ({
+    todoService: {
+        getAllTodos: jest.fn(),
+        createTodo: jest.fn(),
+    }
+}));
+
+// Cast the mocked service for TypeScript
+const mockedTodoService = todoService as jest.Mocked<typeof todoService>;
+
+describe('Due Dates API Tests', () => {
     beforeEach(() => {
-        // Reset modules before each test for clean state
-        jest.resetModules();
+        jest.clearAllMocks();
     });
 
     describe('GET /api/todos - with due dates', () => {
         it('should return todos with due dates included', async () => {
-            // Mock NextResponse
-            const mockJson = jest.fn((data: any, init?: any) => ({
-                status: init?.status || 200,
-                async json() { return data; }
-            }));
-
-            jest.doMock('next/server', () => ({
-                NextResponse: { json: mockJson }
-            }));
-
-            // Mock Prisma
-            const mockFindMany = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: { findMany: mockFindMany, create: jest.fn() },
-                },
-            }));
-
-            // Mock data with due dates
             const mockTodos = [
                 {
                     id: 1,
                     title: 'Todo with due date',
                     dueDate: new Date('2025-08-25'),
                     createdAt: new Date('2025-08-19'),
+                    completed: false,
+                    estimatedDays: 1,
+                    imageUrl: null,
+                    imageAlt: null,
+                    imageLoading: false,
+                    lastImageSearch: null,
+                    updatedAt: new Date(),
+                    earliestStartDate: null,
+                    criticalPathLength: 0,
+                    isOnCriticalPath: false,
+                    dependencies: [],
+                    dependents: [],
+                    actualStartDate: null,
+                    actualEndDate: null
                 },
                 {
                     id: 2,
                     title: 'Todo without due date',
                     dueDate: null,
                     createdAt: new Date('2025-08-18'),
+                    completed: false,
+                    estimatedDays: 1,
+                    imageUrl: null,
+                    imageAlt: null,
+                    imageLoading: false,
+                    lastImageSearch: null,
+                    updatedAt: new Date(),
+                    earliestStartDate: null,
+                    criticalPathLength: 0,
+                    isOnCriticalPath: false,
+                    dependencies: [],
+                    dependents: [],
+                    actualStartDate: null,
+                    actualEndDate: null
                 },
             ];
 
-            mockFindMany.mockResolvedValue(mockTodos);
+            mockedTodoService.getAllTodos.mockResolvedValue(mockTodos);
 
-            // Import and test
             const { GET } = await import('../route');
             const response = await GET();
             const data = await response.json();
@@ -57,144 +86,115 @@ describe('Due Dates API Tests', () => {
 
     describe('POST /api/todos - with due dates', () => {
         it('should create todo without due date', async () => {
-            // Setup mocks
-            const mockJson = jest.fn((data: any, init?: any) => ({
-                status: init?.status || 200,
-                async json() { return data; }
-            }));
-
-            jest.doMock('next/server', () => ({
-                NextResponse: { json: mockJson },
-                NextRequest: class {
-                    constructor(public url: string, public options: any) { }
-                    async json() { return { title: 'Test todo' }; }
-                }
-            }));
-
-            const mockCreate = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: { findMany: jest.fn(), create: mockCreate },
-                },
-            }));
-
-            const mockTodo = {
-                id: 1,
-                title: 'Test todo',
-                dueDate: null,
-                createdAt: new Date(),
-            };
-
-            mockCreate.mockResolvedValue(mockTodo);
-
-            // Create mock request - explicitly no due date
-            const request = {
-                async json() { return { title: 'Test todo', dueDate: null }; }
-            } as any;
-
-            // Import and test
-            const { POST } = await import('../route');
-            const response = await POST(request);
-            const data = await response.json();
-
-            // Debug: log the actual response if it fails
-            if (response.status !== 201) {
-                console.log('Unexpected status:', response.status);
-                console.log('Response data:', data);
-            }
-
-            expect(response.status).toBe(201);
-            expect(data).toEqual(mockTodo);
-            expect(mockCreate).toHaveBeenCalledWith({
-                data: {
+            const mockResult = {
+                newTodo: 1,
+                todos: [{
+                    id: 1,
                     title: 'Test todo',
                     dueDate: null,
-                },
-            });
-        });
-
-        it('should create todo without due date field (undefined)', async () => {
-            // Setup mocks
-            const mockJson = jest.fn((data: any, init?: any) => ({
-                status: init?.status || 201,
-                async json() { return data; }
-            }));
-
-            jest.doMock('next/server', () => ({
-                NextResponse: { json: mockJson }
-            }));
-
-            const mockCreate = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: { findMany: jest.fn(), create: mockCreate },
-                },
-            }));
-
-            const mockTodo = {
-                id: 1,
-                title: 'Test todo',
-                dueDate: null,
-                createdAt: new Date(),
+                    createdAt: new Date(),
+                    completed: false,
+                    estimatedDays: 1,
+                    imageUrl: null,
+                    imageAlt: null,
+                    imageLoading: true,
+                    lastImageSearch: null,
+                    updatedAt: new Date(),
+                    earliestStartDate: null,
+                    criticalPathLength: 0,
+                    isOnCriticalPath: false,
+                    dependencies: [],
+                    dependents: [],
+                    actualStartDate: null,
+                    actualEndDate: null
+                }]
             };
 
-            mockCreate.mockResolvedValue(mockTodo);
+            mockedTodoService.createTodo.mockResolvedValue(mockResult);
 
-            // Create mock request - dueDate field completely omitted
             const request = {
                 async json() { return { title: 'Test todo' }; }
             } as any;
 
-            // Import and test
             const { POST } = await import('../route');
             const response = await POST(request);
             const data = await response.json();
 
-            // Debug: log the actual response if it fails
-            if (response.status !== 201) {
-                console.log('Unexpected status (undefined case):', response.status);
-                console.log('Response data (undefined case):', data);
-            }
-
             expect(response.status).toBe(201);
-            expect(data).toEqual(mockTodo);
-            expect(mockCreate).toHaveBeenCalledWith({
-                data: {
+            expect(data.newTodo).toBe(1);
+            expect(data.todos).toHaveLength(1);
+            expect(data.todos[0].title).toBe('Test todo');
+            expect(mockedTodoService.createTodo).toHaveBeenCalledWith({ title: 'Test todo' });
+        });
+
+        it('should create todo without due date field (undefined)', async () => {
+            const mockResult = {
+                newTodo: 1,
+                todos: [{
+                    id: 1,
                     title: 'Test todo',
                     dueDate: null,
-                },
-            });
+                    createdAt: new Date(),
+                    completed: false,
+                    estimatedDays: 1,
+                    imageUrl: null,
+                    imageAlt: null,
+                    imageLoading: true,
+                    lastImageSearch: null,
+                    updatedAt: new Date(),
+                    earliestStartDate: null,
+                    criticalPathLength: 0,
+                    isOnCriticalPath: false,
+                    dependencies: [],
+                    dependents: [],
+                    actualStartDate: null,
+                    actualEndDate: null
+                }]
+            };
+
+            mockedTodoService.createTodo.mockResolvedValue(mockResult);
+
+            const request = {
+                async json() { return { title: 'Test todo' }; }
+            } as any;
+
+            const { POST } = await import('../route');
+            const response = await POST(request);
+            const data = await response.json();
+
+            expect(response.status).toBe(201);
+            expect(data.newTodo).toBe(1);
+            expect(data.todos).toHaveLength(1);
         });
 
         it('should create todo with valid due date', async () => {
-            // Setup mocks
-            const mockJson = jest.fn((data: any, init?: any) => ({
-                status: init?.status || 201,
-                async json() { return data; }
-            }));
-
-            jest.doMock('next/server', () => ({
-                NextResponse: { json: mockJson }
-            }));
-
-            const mockCreate = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: { findMany: jest.fn(), create: mockCreate },
-                },
-            }));
-
             const dueDate = '2025-08-25';
-            const mockTodo = {
-                id: 1,
-                title: 'Todo with due date',
-                dueDate: new Date(dueDate),
-                createdAt: new Date(),
+            const mockResult = {
+                newTodo: 1,
+                todos: [{
+                    id: 1,
+                    title: 'Todo with due date',
+                    dueDate: new Date(dueDate),
+                    createdAt: new Date(),
+                    completed: false,
+                    estimatedDays: 1,
+                    imageUrl: null,
+                    imageAlt: null,
+                    imageLoading: true,
+                    lastImageSearch: null,
+                    updatedAt: new Date(),
+                    earliestStartDate: null,
+                    criticalPathLength: 0,
+                    isOnCriticalPath: false,
+                    dependencies: [],
+                    dependents: [],
+                    actualStartDate: null,
+                    actualEndDate: null
+                }]
             };
 
-            mockCreate.mockResolvedValue(mockTodo);
+            mockedTodoService.createTodo.mockResolvedValue(mockResult);
 
-            // Create mock request with due date
             const request = {
                 async json() {
                     return {
@@ -204,40 +204,23 @@ describe('Due Dates API Tests', () => {
                 }
             } as any;
 
-            // Import and test
             const { POST } = await import('../route');
             const response = await POST(request);
             const data = await response.json();
 
             expect(response.status).toBe(201);
-            expect(data).toEqual(mockTodo);
-            expect(mockCreate).toHaveBeenCalledWith({
-                data: {
-                    title: 'Todo with due date',
-                    dueDate: new Date(dueDate),
-                },
+            expect(data.newTodo).toBe(1);
+            expect(data.todos).toHaveLength(1);
+            expect(data.todos[0].dueDate).toEqual(new Date(dueDate));
+            expect(mockedTodoService.createTodo).toHaveBeenCalledWith({
+                title: 'Todo with due date',
+                dueDate: dueDate
             });
         });
 
         it('should reject invalid due date format', async () => {
-            // Setup mocks for error case
-            const mockJson = jest.fn((data: any, init?: any) => ({
-                status: init?.status || 400,
-                async json() { return data; }
-            }));
+            mockedTodoService.createTodo.mockRejectedValue(new Error('Invalid due date format'));
 
-            jest.doMock('next/server', () => ({
-                NextResponse: { json: mockJson }
-            }));
-
-            const mockCreate = jest.fn();
-            jest.doMock('../../../../lib/prisma', () => ({
-                prisma: {
-                    todo: { findMany: jest.fn(), create: mockCreate },
-                },
-            }));
-
-            // Create mock request with invalid due date
             const request = {
                 async json() {
                     return {
@@ -247,14 +230,47 @@ describe('Due Dates API Tests', () => {
                 }
             } as any;
 
-            // Import and test
             const { POST } = await import('../route');
             const response = await POST(request);
             const data = await response.json();
 
             expect(response.status).toBe(400);
             expect(data).toEqual({ error: 'Invalid due date format' });
-            expect(mockCreate).not.toHaveBeenCalled();
+        });
+
+        it('should reject missing title', async () => {
+            const request = {
+                async json() {
+                    return { dueDate: '2025-08-25' };
+                }
+            } as any;
+
+            const { POST } = await import('../route');
+            const response = await POST(request);
+            const data = await response.json();
+
+            expect(response.status).toBe(400);
+            expect(data).toEqual({ error: 'Title is required' });
+            expect(mockedTodoService.createTodo).not.toHaveBeenCalled();
+        });
+
+        it('should reject invalid estimated days', async () => {
+            const request = {
+                async json() {
+                    return {
+                        title: 'Test todo',
+                        estimatedDays: 500
+                    };
+                }
+            } as any;
+
+            const { POST } = await import('../route');
+            const response = await POST(request);
+            const data = await response.json();
+
+            expect(response.status).toBe(400);
+            expect(data).toEqual({ error: 'Estimated days must be between 1 and 365' });
+            expect(mockedTodoService.createTodo).not.toHaveBeenCalled();
         });
     });
 });
