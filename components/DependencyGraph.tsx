@@ -100,8 +100,8 @@ function getHierarchicalLayout(todos: TodoWithRelations[], criticalPath: number[
                     )
                 },
                 style: {
-                    background: isOnCriticalPath ? '#fee2e2' : todo.completed ? '#e6ffed' : '#f3f4f6',
-                    border: isOnCriticalPath ? '2px solid #dc2626' : todo.completed ? '2px solid #16a34a' : '1px solid #9ca3af',
+                    background: todo.completed ? '#e6ffed' : isOnCriticalPath ? '#fee2e2' : '#f3f4f6',
+                    border: todo.completed ? '2px solid #16a34a' : isOnCriticalPath ? '2px solid #dc2626' : '1px solid #9ca3af',
                     borderRadius: '8px',
                     padding: '10px',
                     width: 180,

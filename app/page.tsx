@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client"
 import { useState, useEffect, useCallback } from 'react';
-import TodoItem from '@/components/ToDoItem';
+import ToDoItem from '@/components/ToDoItem';
 import AddToDoForm from '@/components/AddToDoForm';
 import EmptyState from '@/components/EmptyState';
 import DependencyGraph from '@/components/DependencyGraph';
@@ -86,6 +86,7 @@ export default function Home() {
   };
 
   const handleToggleComplete = async (id: number) => {
+    setIsRecalculating(true);
     try {
       const todo = todos.find(t => t.id === id);
       if (!todo) return;
@@ -95,9 +96,12 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed: !todo.completed })
       });
+      // The backend recalculates critical path on completion change
       await fetchTodos();
     } catch (error) {
       console.error('Failed to toggle todo:', error);
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -195,8 +199,8 @@ export default function Home() {
       </div>
 
       {/* Main Content Area with 70/30 Split */}
-      <div className="container mx-auto px-6 max-w-8xl">
-        <div className="flex gap-12">
+      <div className="container mx-auto px-6 max-w-7xl">
+        <div className="flex gap-8">
           {/* Left Column - 70% */}
           <div className="flex-1">
             {/* Critical Path Summary */}
@@ -304,13 +308,14 @@ export default function Home() {
 
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                     {todos.map((todo) => (
-                      <TodoItem
+                      <ToDoItem
                         key={todo.id}
                         todo={todo}
                         allTodos={todos}
                         onDelete={handleDeleteTodo}
                         onImageUpdate={handleImageUpdate}
                         onUpdate={handleUpdate}
+                        onToggleComplete={handleToggleComplete}
                       />
                     ))}
                   </div>

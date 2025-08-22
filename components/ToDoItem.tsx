@@ -1,9 +1,9 @@
 // components/TodoItem.tsx
 'use client';
 
-import { TodoWithRelations } from '@/lib/types';
 import { useState, useEffect } from 'react';
 import EditToDoModal from './EditToDoModal';
+import { TodoWithRelations } from '@/lib/types';
 
 interface TodoItemProps {
     todo: TodoWithRelations;
@@ -11,6 +11,7 @@ interface TodoItemProps {
     onDelete: (id: number) => void;
     onImageUpdate: (todoId: number, imageData: { imageUrl: string; imageAlt: string }) => void;
     onUpdate: () => void;
+    onToggleComplete: (id: number) => void;
 }
 
 export default function TodoItem({
@@ -18,7 +19,8 @@ export default function TodoItem({
     allTodos,
     onDelete,
     onImageUpdate,
-    onUpdate
+    onUpdate,
+    onToggleComplete
 }: TodoItemProps) {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isHovered, setIsHovered] = useState(false);
@@ -59,16 +61,7 @@ export default function TodoItem({
 
     const handleToggleComplete = async (e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent opening modal
-        try {
-            await fetch(`/api/todos/${todo.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ completed: !todo.completed })
-            });
-            onUpdate();
-        } catch (error) {
-            console.error('Failed to toggle todo:', error);
-        }
+        onToggleComplete(todo.id);
     };
 
     const handleDelete = async (e: React.MouseEvent) => {
@@ -89,20 +82,17 @@ export default function TodoItem({
 
     const formatDate = (date: string | null) => {
         if (!date) return null;
-        const dateObj = new Date(date);
-        // Use UTC methods to avoid timezone conversion
-        return dateObj.toLocaleDateString('en-US', {
+        return new Date(date).toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
-            year: 'numeric',
-            timeZone: 'UTC' // Force UTC interpretation
+            year: 'numeric'
         });
     };
 
     const isOverdue = todo.dueDate && new Date(todo.dueDate) < new Date() && !todo.completed;
     const isDueSoon = todo.dueDate &&
         new Date(todo.dueDate) > new Date() &&
-        new Date(todo.dueDate) <= new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) &&
+        new Date(todo.dueDate) <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) &&
         !todo.completed;
 
     // Card styling based on state
@@ -152,8 +142,8 @@ export default function TodoItem({
                             <button
                                 onClick={handleToggleComplete}
                                 className={`mt-1.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all duration-200 transform hover:scale-110 ${todo.completed
-                                    ? 'bg-gradient-to-br from-green-500 to-green-600 border-green-500 text-white shadow-lg shadow-green-500/25'
-                                    : 'border-gray-300 hover:border-green-400 hover:bg-green-50 active:scale-95'
+                                        ? 'bg-gradient-to-br from-green-500 to-green-600 border-green-500 text-white shadow-lg shadow-green-500/25'
+                                        : 'border-gray-300 hover:border-green-400 hover:bg-green-50 active:scale-95'
                                     }`}
                             >
                                 {todo.completed && (
@@ -171,68 +161,59 @@ export default function TodoItem({
                                 </h3>
 
                                 {/* Metadata */}
-                                <div className="mt-3 grid grid-cols-4">
-                                    <div className='col-span-3 space-y-1'>
-                                        {/* Due Date */}
-                                        {todo.dueDate && (
-                                            <div className={`text-sm ${isOverdue ? 'text-red-600 font-medium' :
+                                <div className="mt-3 flex flex-wrap gap-3">
+                                    {/* Due Date */}
+                                    {todo.dueDate && (
+                                        <div className={`text-sm ${isOverdue ? 'text-red-600 font-medium' :
                                                 isDueSoon ? 'text-orange-600 font-medium' :
-                                                    'text-gray-800'
-                                                }`}>
-                                                <span className="inline-flex items-center">
-                                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                                    </svg>
-                                                    Due Date: {formatDate(todo.dueDate.toString())}
-                                                    {isOverdue && ' (Overdue)'}
-                                                    {isDueSoon && ' (Soon)'}
-                                                </span>
-                                            </div>
-                                        )}
+                                                    'text-gray-600'
+                                            }`}>
+                                            <span className="inline-flex items-center">
+                                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                </svg>
+                                                {formatDate(todo.dueDate.toString())}
+                                                {isOverdue && ' (Overdue)'}
+                                                {isDueSoon && ' (Soon)'}
+                                            </span>
+                                        </div>
+                                    )}
 
-                                        {/* Earliest Start Date */}
-                                        {todo.earliestStartDate && (
-                                            <div className="text-sm text-gray-500">
-                                                <span className="inline-flex items-center">
-                                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-                                                    </svg>
-                                                    Earliest Start: {formatDate(todo.earliestStartDate.toString())}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
+                                    {/* Estimated Days */}
+                                    {todo.estimatedDays && (
+                                        <div className="text-sm text-blue-600">
+                                            <span className="inline-flex items-center">
+                                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                {todo.estimatedDays} day{todo.estimatedDays !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                    )}
 
-                                    <div className='col-span-1 space-y-1 text-right'>
-                                        {/* Estimated Days */}
-                                        {todo.estimatedDays && (
-                                            <div className="text-sm text-blue-600">
-                                                <span className="inline-flex items-center">
-                                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                    </svg>
-                                                    {todo.estimatedDays} day{todo.estimatedDays !== 1 ? 's' : ''}
-                                                </span>
-                                            </div>
-                                        )}
+                                    {/* Dependencies count */}
+                                    {todo.dependencies && todo.dependencies.length > 0 && (
+                                        <div className="text-sm text-purple-600">
+                                            <span className="inline-flex items-center">
+                                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                                </svg>
+                                                {todo.dependencies.length} dep{todo.dependencies.length !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                    )}
 
-                                        {/* Dependencies count */}
-                                        {todo.dependencies && todo.dependencies.length > 0 && (
-                                            <div className="text-sm text-purple-600">
-                                                <span className="inline-flex items-center">
-                                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                                    </svg>
-                                                    {todo.dependencies.length} dep{todo.dependencies.length !== 1 ? 's' : ''}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
-
-
-
-
-
+                                    {/* Earliest Start Date */}
+                                    {todo.earliestStartDate && (
+                                        <div className="text-sm text-purple-600">
+                                            <span className="inline-flex items-center">
+                                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                                                </svg>
+                                                Start: {formatDate(todo.earliestStartDate.toString())}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
