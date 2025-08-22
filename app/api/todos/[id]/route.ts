@@ -1,6 +1,7 @@
 // app/api/todos/[id]/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { pexelsService } from '@/lib/pexels';
 
 interface Params {
   params: {
@@ -123,7 +124,7 @@ export async function PATCH(
           where: { id },
           data: { imageLoading: true },
         });
-        generateImageForTodo(id, body.title);
+        pexelsService.generateAndSaveImage(id, body.title);
       }
 
       return NextResponse.json(todoWithCriticalPath);
@@ -135,7 +136,7 @@ export async function PATCH(
         where: { id },
         data: { imageLoading: true },
       });
-      generateImageForTodo(id, body.title);
+      pexelsService.generateAndSaveImage(id, body.title);
     }
 
     return NextResponse.json(updatedTodo);
@@ -210,64 +211,5 @@ async function recalculateCriticalPath() {
     );
 
     await prisma.$transaction(updatePromises);
-  }
-}
-
-// Helper function to generate image asynchronously
-async function generateImageForTodo(todoId: number, title: string) {
-  try {
-    const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
-
-    if (!PEXELS_API_KEY) {
-      console.error('PEXELS_API_KEY not configured');
-      return;
-    }
-
-    // Search for images based on title
-    const searchQuery = encodeURIComponent(title);
-    const response = await fetch(
-      `https://api.pexels.com/v1/search?query=${searchQuery}&per_page=1&orientation=landscape`,
-      {
-        headers: {
-          'Authorization': PEXELS_API_KEY,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch from Pexels');
-    }
-
-    const data = await response.json();
-
-    // Update todo with image data
-    if (data.photos && data.photos.length > 0) {
-      const photo = data.photos[0];
-      await prisma.todo.update({
-        where: { id: todoId },
-        data: {
-          imageUrl: photo.src.medium,
-          imageAlt: photo.alt || `Image for ${title}`,
-          imageLoading: false,
-          lastImageSearch: title,
-        },
-      });
-    } else {
-      // No image found, just clear loading state
-      await prisma.todo.update({
-        where: { id: todoId },
-        data: {
-          imageLoading: false,
-          lastImageSearch: title,
-        },
-      });
-    }
-  } catch (error) {
-    console.error('Error generating image:', error);
-    // Clear loading state on error
-    await prisma.todo.update({
-      where: { id: todoId },
-      data: { imageLoading: false },
-    }).catch(() => { }); // Ignore errors in cleanup
   }
 }

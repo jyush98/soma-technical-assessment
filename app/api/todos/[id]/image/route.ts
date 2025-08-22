@@ -63,7 +63,10 @@ export async function POST(
             // No image found or API error - reset loading state
             await prisma.todo.update({
                 where: { id: todoId },
-                data: { imageLoading: false }
+                data: {
+                    imageLoading: false,
+                    lastImageSearch: todo.title // Still cache that we tried
+                }
             });
 
             return NextResponse.json({

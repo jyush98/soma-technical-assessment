@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
     // Trigger image generation asynchronously after creation
     if (result.newTodo) {
-      generateImageForTodo(result.newTodo, body.title);
+      pexelsService.generateAndSaveImage(result.newTodo, body.title);
     }
 
     return NextResponse.json(result, { status: 201 });
@@ -41,41 +41,5 @@ export async function POST(request: Request) {
     }
     console.error('Error creating todo:', error);
     return NextResponse.json({ error: 'Error creating todo' }, { status: 500 });
-  }
-}
-
-// Use your existing PexelsService
-async function generateImageForTodo(todoId: number, title: string) {
-  try {
-    // Use your existing service instead of raw fetch
-    const photo = await pexelsService.searchImage(title);
-
-    if (photo) {
-      await prisma.todo.update({
-        where: { id: todoId },
-        data: {
-          imageUrl: photo.src.medium,
-          imageAlt: photo.alt || `Image for ${title}`,
-          imageLoading: false,
-          lastImageSearch: title,
-        },
-      });
-    } else {
-      // No image found, just clear loading state
-      await prisma.todo.update({
-        where: { id: todoId },
-        data: {
-          imageLoading: false,
-          lastImageSearch: title,
-        },
-      });
-    }
-  } catch (error) {
-    console.error('Error generating image:', error);
-    // Clear loading state on error
-    await prisma.todo.update({
-      where: { id: todoId },
-      data: { imageLoading: false },
-    }).catch(() => { });
   }
 }

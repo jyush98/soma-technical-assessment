@@ -91,6 +91,54 @@ class PexelsService {
     }
 
     /**
+ * Generate and save image for a todo item
+ * Handles the complete flow: search, save to DB, and error handling
+ */
+    async generateAndSaveImage(todoId: number, title: string): Promise<void> {
+        try {
+            // Import prisma here to avoid circular dependencies
+            const { prisma } = await import('@/lib/prisma');
+
+            // Search for image
+            const photo = await this.searchImage(title);
+
+            if (photo) {
+                // Update todo with image data
+                await prisma.todo.update({
+                    where: { id: todoId },
+                    data: {
+                        imageUrl: photo.src.medium,
+                        imageAlt: photo.alt || `Image for ${title}`,
+                        imageLoading: false,
+                        lastImageSearch: title,
+                    },
+                });
+            } else {
+                // No image found, just clear loading state
+                await prisma.todo.update({
+                    where: { id: todoId },
+                    data: {
+                        imageLoading: false,
+                        lastImageSearch: title,
+                    },
+                });
+            }
+        } catch (error) {
+            console.error('Error generating image for todo:', error);
+            // Always clear loading state on error
+            try {
+                const { prisma } = await import('@/lib/prisma');
+                await prisma.todo.update({
+                    where: { id: todoId },
+                    data: { imageLoading: false },
+                });
+            } catch (dbError) {
+                console.error('Error clearing loading state:', dbError);
+            }
+        }
+    }
+
+    /**
      * Transform todo titles into better search queries for visual content
      * This is key to getting relevant images instead of generic results
      */

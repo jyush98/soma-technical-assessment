@@ -1,6 +1,7 @@
 // lib/services/todo.service.ts
 import { PrismaClient } from '@prisma/client';
 import { DependencyGraphService } from '@/lib/dependency-graph';
+import { pexelsService } from '../pexels';
 
 export interface CreateTodoInput {
     title: string;
@@ -67,7 +68,7 @@ export class TodoService {
         });
 
         // Trigger async operations (non-blocking)
-        this.generateImageForTodo(result!.id, result!.title);
+        pexelsService.generateAndSaveImage(result!.id, result!.title);
         await this.recalculateCriticalPath();
 
         // Return all todos with updated state
@@ -77,27 +78,6 @@ export class TodoService {
             newTodo: result!.id,
             todos: allTodos
         };
-    }
-
-    private async generateImageForTodo(todoId: number, title: string) {
-        // Image generation logic here (moved from route)
-        try {
-            const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
-            if (!PEXELS_API_KEY) {
-                await this.prisma.todo.update({
-                    where: { id: todoId },
-                    data: { imageLoading: false },
-                });
-                return;
-            }
-            // ... rest of image generation
-        } catch (error) {
-            console.error('Error generating image:', error);
-            await this.prisma.todo.update({
-                where: { id: todoId },
-                data: { imageLoading: false },
-            }).catch(() => { });
-        }
     }
 
     private async recalculateCriticalPath() {
